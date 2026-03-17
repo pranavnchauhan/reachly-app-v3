@@ -59,12 +59,18 @@ async function searchForPerson(
   result: SignalResult,
   apiKey: string
 ): Promise<Record<string, unknown> | null> {
+  const seniorities = ["owner", "founder", "c_suite", "vp", "director"];
   const searches = [
+    // Try AU-located contacts first
     result.company.domain
-      ? { q_organization_domains: result.company.domain, person_seniorities: ["owner", "founder", "c_suite", "vp", "director"] }
+      ? { q_organization_domains: result.company.domain, person_seniorities: seniorities, person_locations: ["Australia"] }
       : null,
-    { organization_ids: [result.company.apollo_id], person_seniorities: ["owner", "founder", "c_suite", "vp", "director"] },
-    { q_organization_name: result.company.name, person_seniorities: ["owner", "founder", "c_suite", "vp", "director"] },
+    { q_organization_name: result.company.name, person_seniorities: seniorities, person_locations: ["Australia"] },
+    // Fallback: any location
+    result.company.domain
+      ? { q_organization_domains: result.company.domain, person_seniorities: seniorities }
+      : null,
+    { q_organization_name: result.company.name, person_seniorities: seniorities },
   ].filter(Boolean);
 
   for (const params of searches) {

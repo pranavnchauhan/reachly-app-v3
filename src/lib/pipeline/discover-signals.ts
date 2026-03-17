@@ -56,7 +56,7 @@ async function searchNewsForSignal(
   geography: string,
   apiKey: string
 ): Promise<DiscoveredCompany[]> {
-  const prompt = `Search for companies in ${geography} that are currently showing this buying signal:
+  const prompt = `Search for companies with significant presence in ${geography} that are currently showing this buying signal:
 
 "${signal.name}" — ${signal.description}
 
@@ -69,10 +69,12 @@ For each company found, provide:
 - The source URL where you found this
 - How confident you are this signal applies (0.0 to 1.0)
 
-IMPORTANT:
+CRITICAL RULES:
+- Only include companies that are HEADQUARTERED in ${geography} OR have a major office/operations in ${geography}
+- Do NOT include overseas companies that merely do business with ${geography} — they must have a physical presence (office, team, operations) there
 - Only cite real, verifiable news sources — no blogs, recruitment sites, or generic articles
 - Only include companies where something SPECIFIC and RECENT happened
-- Include the company's industry and location if mentioned
+- Include the company's Australian office location if they are a global company
 
 Respond in this exact JSON format:
 {
@@ -81,7 +83,7 @@ Respond in this exact JSON format:
       "name": "Company Name",
       "domain": "company.com",
       "industry": "Industry",
-      "location": "City, State",
+      "location": "City, State, Australia",
       "evidence": "Specific event from the news",
       "source_url": "https://source-url.com/article",
       "confidence": 0.85
