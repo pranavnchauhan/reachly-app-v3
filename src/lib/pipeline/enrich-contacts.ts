@@ -1,6 +1,7 @@
 // Step 3: Enrich companies with decision-maker contacts via Apollo
 
 import type { SignalResult } from "./find-signals";
+import { safeFetchJson } from "./safe-fetch";
 
 export interface EnrichedLead {
   company: SignalResult["company"];
@@ -25,15 +26,12 @@ export async function enrichContacts(
 
   const enriched: EnrichedLead[] = [];
 
-  // Process in batches of 3 to avoid rate limits
   for (let i = 0; i < signalResults.length; i += 3) {
     const batch = signalResults.slice(i, i + 3);
     const batchResults = await Promise.all(
-      batch.map((result) =>
-        findContactForCompany(result, targetTitles, apiKey)
-      )
+      batch.map((result) => findContactForCompany(result, targetTitles, apiKey))
     );
-    enriched.push(...batchResults.filter(Boolean) as EnrichedLead[]);
+    enriched.push(...(batchResults.filter(Boolean) as EnrichedLead[]));
 
     if (i + 3 < signalResults.length) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -48,107 +46,61 @@ async function findContactForCompany(
   targetTitles: string[],
   apiKey: string
 ): Promise<EnrichedLead | null> {
-  // Try multiple search strategies using the NEW api_search endpoint
   const strategies = [
-    () => searchByDomain(result, apiKey),
-    () => searchByOrgId(result, apiKey),
-    () => searchByCompanyName(result, apiKey),
+    () => searchPeople({ q_organization_domains: result.company.domain }, result, apiKey),
+    () => searchPeople({ organization_ids: [result.company.apollo_id] }, result, apiKey),
+    () => searchPeople({ q_organization_name: result.company.name }, result, apiKey),
   ];
 
-  for (const strategy of strategies) {
-    try {
-      const lead = await strategy();
-      if (lead) return lead;
-    } catch (error) {
-      console.error(`Contact search failed for ${result.company.name}:`, error);
-    }
+  // Skip domain search if no domain
+  const start = result.company.domain ? 0 : 1;
+
+  for (let i = start; i < strategies.length; i++) {
+    const lead = await strategies[i]();
+    if (lead) return lead;
   }
 
   return null;
 }
 
-async function apolloPeopleSearch(
-  params: Record<string, unknown>,
-  apiKey: string
-): Promise<Record<string, unknown>[]> {
-  const response = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Api-Key": apiKey,
-    },
-    body: JSON.stringify({
-      ...params,
-      per_page: 5,
-      page: 1,
-    }),
-  });
-
-  if (!response.ok) return [];
-  const data = await response.json();
-  return data.people || [];
-}
-
-async function searchByDomain(
+async function searchPeople(
+  filter: Record<string, unknown>,
   result: SignalResult,
   apiKey: string
 ): Promise<EnrichedLead | null> {
-  if (!result.company.domain) return null;
+  const { ok, data } = await safeFetchJson(
+    "https://api.apollo.io/api/v1/mixed_people/api_search",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
+      body: JSON.stringify({
+        ...filter,
+        person_seniorities: ["owner", "founder", "c_suite", "vp", "director", "manager"],
+        per_page: 5,
+        page: 1,
+      }),
+    }
+  );
 
-  const people = await apolloPeopleSearch({
-    q_organization_domains: result.company.domain,
-    person_seniorities: ["owner", "founder", "c_suite", "vp", "director", "manager"],
-  }, apiKey);
+  if (!ok) return null;
 
-  return pickBestContact(people, result);
-}
-
-async function searchByOrgId(
-  result: SignalResult,
-  apiKey: string
-): Promise<EnrichedLead | null> {
-  const people = await apolloPeopleSearch({
-    organization_ids: [result.company.apollo_id],
-    person_seniorities: ["owner", "founder", "c_suite", "vp", "director"],
-  }, apiKey);
-
-  return pickBestContact(people, result);
-}
-
-async function searchByCompanyName(
-  result: SignalResult,
-  apiKey: string
-): Promise<EnrichedLead | null> {
-  const people = await apolloPeopleSearch({
-    q_organization_name: result.company.name,
-    person_seniorities: ["owner", "founder", "c_suite", "vp", "director"],
-  }, apiKey);
-
-  return pickBestContact(people, result);
-}
-
-function pickBestContact(
-  people: Record<string, unknown>[],
-  result: SignalResult
-): EnrichedLead | null {
+  const people = (data.people as Record<string, unknown>[]) || [];
   if (people.length === 0) return null;
 
-  // Prefer people with email, then by seniority
   const withEmail = people.filter((p) => p.email);
-  const bestMatch = withEmail.length > 0 ? withEmail[0] : people[0];
+  const best = withEmail.length > 0 ? withEmail[0] : people[0];
 
   return {
     company: result.company,
     matched_signals: result.matched_signals,
     total_score: result.total_score,
     contact: {
-      name: `${bestMatch.first_name || ""} ${bestMatch.last_name || ""}`.trim() || "Unknown",
-      title: (bestMatch.title as string) || "Unknown",
-      email: (bestMatch.email as string) || null,
-      phone: (bestMatch.phone_number as string) ||
-             ((bestMatch.phone_numbers as Record<string, string>[])?.[0]?.sanitized_number) || null,
-      linkedin_url: (bestMatch.linkedin_url as string) || null,
-      apollo_id: bestMatch.id as string,
+      name: `${best.first_name || ""} ${best.last_name || ""}`.trim() || "Unknown",
+      title: (best.title as string) || "Unknown",
+      email: (best.email as string) || null,
+      phone: (best.phone_number as string) || null,
+      linkedin_url: (best.linkedin_url as string) || null,
+      apollo_id: (best.id as string) || "",
     },
   };
 }

@@ -2,6 +2,7 @@
 
 import type { Signal } from "@/types/database";
 import type { SourcedCompany } from "./source-companies";
+import { safeFetchJson } from "./safe-fetch";
 
 export interface SignalResult {
   company: SourcedCompany;
@@ -23,7 +24,7 @@ export async function findSignals(
 
   const results: SignalResult[] = [];
 
-  // Process companies in batches of 5 to avoid rate limits
+  // Process companies in batches of 5
   for (let i = 0; i < companies.length; i += 5) {
     const batch = companies.slice(i, i + 5);
     const batchResults = await Promise.all(
@@ -31,13 +32,11 @@ export async function findSignals(
     );
     results.push(...batchResults);
 
-    // Brief pause between batches
     if (i + 5 < companies.length) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
 
-  // Sort by total score descending — best matches first
   return results
     .filter((r) => r.matched_signals.length > 0)
     .sort((a, b) => b.total_score - a.total_score);
@@ -48,6 +47,8 @@ async function detectSignalsForCompany(
   signals: Signal[],
   apiKey: string
 ): Promise<SignalResult> {
+  const empty: SignalResult = { company, matched_signals: [], total_score: 0 };
+
   const signalList = signals
     .map((s, i) => `${i + 1}. "${s.name}" - ${s.description}`)
     .join("\n");
@@ -72,8 +73,9 @@ Respond ONLY in this JSON format, no other text:
 
 If no signals apply, respond with: {"signals": []}`;
 
-  try {
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+  const { ok, data } = await safeFetchJson(
+    "https://api.perplexity.ai/chat/completions",
+    {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -84,69 +86,46 @@ If no signals apply, respond with: {"signals": []}`;
         messages: [
           {
             role: "system",
-            content:
-              "You are a B2B research analyst. Respond only with valid JSON. Be specific with evidence — cite real events, dates, or sources when possible.",
+            content: "You are a B2B research analyst. Respond only with valid JSON.",
           },
           { role: "user", content: prompt },
         ],
         temperature: 0.1,
       }),
-    });
-
-    const responseText = await response.text();
-
-    if (!response.ok) {
-      console.error(`Perplexity error for ${company.name}: ${response.status} - ${responseText.slice(0, 100)}`);
-      return { company, matched_signals: [], total_score: 0 };
     }
+  );
 
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      console.error(`Perplexity non-JSON for ${company.name}: ${responseText.slice(0, 100)}`);
-      return { company, matched_signals: [], total_score: 0 };
-    }
+  if (!ok) return empty;
 
-    const content = data.choices?.[0]?.message?.content || "";
+  const content = (data as Record<string, unknown[]>).choices?.[0] as Record<string, Record<string, string>> | undefined;
+  const text = content?.message?.content || "";
 
-    // Extract JSON from response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return { company, matched_signals: [], total_score: 0 };
-    }
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return empty;
 
-    let parsed;
-    try {
-      parsed = JSON.parse(jsonMatch[0]);
-    } catch {
-      return { company, matched_signals: [], total_score: 0 };
-    }
-    const matchedSignals = (parsed.signals || [])
-      .filter(
-        (s: { number: number }) =>
-          s.number >= 1 && s.number <= signals.length
-      )
-      .map(
-        (s: { number: number; evidence: string; confidence: number }) => ({
-          signal_id: signals[s.number - 1].id,
-          signal_name: signals[s.number - 1].name,
-          evidence: s.evidence || "",
-          confidence: Math.min(1, Math.max(0, s.confidence || 0.5)),
-        })
-      );
-
-    const totalScore = matchedSignals.reduce(
-      (sum: number, s: { confidence: number; signal_id: string }) => {
-        const signal = signals.find((sig) => sig.id === s.signal_id);
-        return sum + s.confidence * (signal?.weight || 5);
-      },
-      0
-    );
-
-    return { company, matched_signals: matchedSignals, total_score: totalScore };
-  } catch (error) {
-    console.error(`Signal detection failed for ${company.name}:`, error);
-    return { company, matched_signals: [], total_score: 0 };
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    return empty;
   }
+
+  const matchedSignals = (parsed.signals || [])
+    .filter((s: { number: number }) => s.number >= 1 && s.number <= signals.length)
+    .map((s: { number: number; evidence: string; confidence: number }) => ({
+      signal_id: signals[s.number - 1].id,
+      signal_name: signals[s.number - 1].name,
+      evidence: s.evidence || "",
+      confidence: Math.min(1, Math.max(0, s.confidence || 0.5)),
+    }));
+
+  const totalScore = matchedSignals.reduce(
+    (sum: number, s: { confidence: number; signal_id: string }) => {
+      const signal = signals.find((sig) => sig.id === s.signal_id);
+      return sum + s.confidence * (signal?.weight || 5);
+    },
+    0
+  );
+
+  return { company, matched_signals: matchedSignals, total_score: totalScore };
 }
