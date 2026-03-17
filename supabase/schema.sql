@@ -237,7 +237,7 @@ begin
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
-    coalesce((new.raw_user_meta_data->>'role')::user_role, 'client')
+    'client'
   );
   return new;
 end;
