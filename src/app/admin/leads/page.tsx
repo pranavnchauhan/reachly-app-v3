@@ -1,10 +1,10 @@
 export const dynamic = "force-dynamic";
 
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { LeadValidationList } from "@/components/admin/lead-validation-list";
 
 export default async function LeadValidationPage() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data: leads } = await supabase
     .from("leads")

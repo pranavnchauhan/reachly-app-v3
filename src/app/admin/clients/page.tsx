@@ -1,11 +1,11 @@
 export const dynamic = "force-dynamic";
 
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Users } from "lucide-react";
 import Link from "next/link";
 
 export default async function ClientsPage() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data: clients } = await supabase
     .from("profiles")

@@ -1,11 +1,11 @@
 export const dynamic = "force-dynamic";
 
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 
 export default async function NicheTemplatesPage() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data: templates } = await supabase
     .from("niche_templates")
     .select("*, profiles(full_name)")
