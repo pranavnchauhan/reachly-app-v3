@@ -48,14 +48,11 @@ async function findContactForCompany(
   targetTitles: string[],
   apiKey: string
 ): Promise<EnrichedLead | null> {
-  // Try multiple search strategies
+  // Try multiple search strategies using the NEW api_search endpoint
   const strategies = [
-    // Strategy 1: Search by company domain + seniority
     () => searchByDomain(result, apiKey),
-    // Strategy 2: Search by organization ID + titles
-    () => searchByOrgId(result, targetTitles, apiKey),
-    // Strategy 3: Search by company name + titles
-    () => searchByCompanyName(result, targetTitles, apiKey),
+    () => searchByOrgId(result, apiKey),
+    () => searchByCompanyName(result, apiKey),
   ];
 
   for (const strategy of strategies) {
@@ -63,11 +60,33 @@ async function findContactForCompany(
       const lead = await strategy();
       if (lead) return lead;
     } catch (error) {
-      console.error(`Contact search strategy failed for ${result.company.name}:`, error);
+      console.error(`Contact search failed for ${result.company.name}:`, error);
     }
   }
 
   return null;
+}
+
+async function apolloPeopleSearch(
+  params: Record<string, unknown>,
+  apiKey: string
+): Promise<Record<string, unknown>[]> {
+  const response = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Api-Key": apiKey,
+    },
+    body: JSON.stringify({
+      ...params,
+      per_page: 5,
+      page: 1,
+    }),
+  });
+
+  if (!response.ok) return [];
+  const data = await response.json();
+  return data.people || [];
 }
 
 async function searchByDomain(
@@ -76,71 +95,36 @@ async function searchByDomain(
 ): Promise<EnrichedLead | null> {
   if (!result.company.domain) return null;
 
-  const response = await fetch("https://api.apollo.io/api/v1/mixed_people/search", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Api-Key": apiKey,
-    },
-    body: JSON.stringify({
-      q_organization_domains: result.company.domain,
-      person_seniorities: ["owner", "founder", "c_suite", "vp", "director", "manager"],
-      per_page: 5,
-      page: 1,
-    }),
-  });
+  const people = await apolloPeopleSearch({
+    q_organization_domains: result.company.domain,
+    person_seniorities: ["owner", "founder", "c_suite", "vp", "director", "manager"],
+  }, apiKey);
 
-  if (!response.ok) return null;
-  const data = await response.json();
-  return pickBestContact(data.people || [], result);
+  return pickBestContact(people, result);
 }
 
 async function searchByOrgId(
   result: SignalResult,
-  targetTitles: string[],
   apiKey: string
 ): Promise<EnrichedLead | null> {
-  const response = await fetch("https://api.apollo.io/api/v1/mixed_people/search", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Api-Key": apiKey,
-    },
-    body: JSON.stringify({
-      organization_ids: [result.company.apollo_id],
-      person_seniorities: ["owner", "founder", "c_suite", "vp", "director"],
-      per_page: 5,
-      page: 1,
-    }),
-  });
+  const people = await apolloPeopleSearch({
+    organization_ids: [result.company.apollo_id],
+    person_seniorities: ["owner", "founder", "c_suite", "vp", "director"],
+  }, apiKey);
 
-  if (!response.ok) return null;
-  const data = await response.json();
-  return pickBestContact(data.people || [], result);
+  return pickBestContact(people, result);
 }
 
 async function searchByCompanyName(
   result: SignalResult,
-  targetTitles: string[],
   apiKey: string
 ): Promise<EnrichedLead | null> {
-  const response = await fetch("https://api.apollo.io/api/v1/mixed_people/search", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Api-Key": apiKey,
-    },
-    body: JSON.stringify({
-      q_organization_name: result.company.name,
-      person_seniorities: ["owner", "founder", "c_suite", "vp", "director"],
-      per_page: 5,
-      page: 1,
-    }),
-  });
+  const people = await apolloPeopleSearch({
+    q_organization_name: result.company.name,
+    person_seniorities: ["owner", "founder", "c_suite", "vp", "director"],
+  }, apiKey);
 
-  if (!response.ok) return null;
-  const data = await response.json();
-  return pickBestContact(data.people || [], result);
+  return pickBestContact(people, result);
 }
 
 function pickBestContact(

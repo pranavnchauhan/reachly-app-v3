@@ -39,7 +39,7 @@ export async function GET() {
       const companyId = orgs[0].id as string;
 
       // Strategy A: by domain
-      const resA = await fetch("https://api.apollo.io/api/v1/mixed_people/search", {
+      const resA = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
         body: JSON.stringify({
@@ -64,7 +64,7 @@ export async function GET() {
       });
 
       // Strategy B: by org ID
-      const resB = await fetch("https://api.apollo.io/api/v1/mixed_people/search", {
+      const resB = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
         body: JSON.stringify({
@@ -89,7 +89,7 @@ export async function GET() {
       });
 
       // Strategy C: by company name
-      const resC = await fetch("https://api.apollo.io/api/v1/mixed_people/search", {
+      const resC = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
         body: JSON.stringify({
