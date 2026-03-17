@@ -93,12 +93,21 @@ If no signals apply, respond with: {"signals": []}`;
       }),
     });
 
+    const responseText = await response.text();
+
     if (!response.ok) {
-      console.error(`Perplexity error for ${company.name}: ${response.status}`);
+      console.error(`Perplexity error for ${company.name}: ${response.status} - ${responseText.slice(0, 100)}`);
       return { company, matched_signals: [], total_score: 0 };
     }
 
-    const data = await response.json();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      console.error(`Perplexity non-JSON for ${company.name}: ${responseText.slice(0, 100)}`);
+      return { company, matched_signals: [], total_score: 0 };
+    }
+
     const content = data.choices?.[0]?.message?.content || "";
 
     // Extract JSON from response
@@ -107,7 +116,12 @@ If no signals apply, respond with: {"signals": []}`;
       return { company, matched_signals: [], total_score: 0 };
     }
 
-    const parsed = JSON.parse(jsonMatch[0]);
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      return { company, matched_signals: [], total_score: 0 };
+    }
     const matchedSignals = (parsed.signals || [])
       .filter(
         (s: { number: number }) =>
