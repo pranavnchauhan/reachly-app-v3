@@ -59,15 +59,31 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
 
   return (
     <div>
-      <div className="flex gap-2 mb-4">
-        {(["all", "discovered", "validated"] as const).map((f) => (
-          <button key={f} onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              filter === f ? "bg-primary text-white" : "bg-card border border-border text-muted hover:text-foreground"
-            }`}>
-            {f.charAt(0).toUpperCase() + f.slice(1)}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex gap-2">
+          {(["all", "discovered", "validated"] as const).map((f) => (
+            <button key={f} onClick={() => setFilter(f)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                filter === f ? "bg-primary text-white" : "bg-card border border-border text-muted hover:text-foreground"
+              }`}>
+              {f.charAt(0).toUpperCase() + f.slice(1)} ({f === "all" ? leads.length : leads.filter(l => l.status === f).length})
+            </button>
+          ))}
+        </div>
+        {leads.length > 0 && (
+          <button
+            onClick={async () => {
+              if (!confirm(`Delete all ${filtered.length} ${filter === "all" ? "" : filter + " "}leads? This cannot be undone.`)) return;
+              const idsToDelete = filtered.map((l) => l.id);
+              await Promise.all(idsToDelete.map((id) => supabase.from("leads").delete().eq("id", id)));
+              setLeads(leads.filter((l) => !idsToDelete.includes(l.id)));
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-danger bg-danger/10 hover:bg-danger/20 transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+            Clear {filter === "all" ? "All" : filter.charAt(0).toUpperCase() + filter.slice(1)} ({filtered.length})
           </button>
-        ))}
+        )}
       </div>
 
       {!filtered.length ? (
