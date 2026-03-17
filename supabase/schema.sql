@@ -176,6 +176,7 @@ create policy "Users can view own profile" on profiles for select using (auth.ui
 create policy "Admins can view all profiles" on profiles for select using (
   exists (select 1 from profiles where id = auth.uid() and role = 'admin')
 );
+create policy "Users can insert own profile" on profiles for insert with check (auth.uid() = id);
 create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
 
 -- Niche Templates: admins full access, clients can read active

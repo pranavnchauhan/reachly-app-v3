@@ -18,7 +18,7 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) =>
+          cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
           supabaseResponse = NextResponse.next({ request });
@@ -30,28 +30,10 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Refresh the session (important for token refresh)
+  await supabase.auth.getUser();
 
-  // Redirect unauthenticated users to login (except public routes)
-  const publicRoutes = ["/auth/login", "/auth/signup", "/auth/callback"];
-  const isPublicRoute = publicRoutes.some((route) =>
-    request.nextUrl.pathname.startsWith(route)
-  );
-
-  if (!user && !isPublicRoute && request.nextUrl.pathname !== "/") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/auth/login";
-    return NextResponse.redirect(url);
-  }
-
-  // Redirect authenticated users away from auth pages
-  if (user && isPublicRoute) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
-    return NextResponse.redirect(url);
-  }
-
+  // Don't redirect in middleware — let pages handle auth logic
+  // This prevents redirect loops when profile is missing
   return supabaseResponse;
 }
