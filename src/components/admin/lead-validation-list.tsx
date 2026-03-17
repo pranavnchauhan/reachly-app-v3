@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Check, X, Eye, ChevronDown, ChevronUp, Mail, Linkedin, Globe, Phone, Building2, MapPin, Users, Flame, Snowflake, ExternalLink } from "lucide-react";
+import {
+  Check, X, Eye, Mail, Linkedin, Globe, Phone, Building2, MapPin,
+  Flame, Snowflake, ExternalLink, ChevronRight, Search,
+} from "lucide-react";
 import type { MatchedSignal, ApproachStrategy, GeneratedEmail } from "@/types/database";
 
 interface Lead {
@@ -33,18 +36,19 @@ interface Lead {
 
 export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
   const [leads, setLeads] = useState(initialLeads);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [filter, setFilter] = useState<"all" | "discovered" | "validated">("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const supabase = createClient();
 
   async function updateLeadStatus(id: string, status: "validated" | "published") {
     const updateData: Record<string, string> = { status };
     if (status === "validated") updateData.validated_at = new Date().toISOString();
     if (status === "published") updateData.published_at = new Date().toISOString();
-
     const { error } = await supabase.from("leads").update(updateData).eq("id", id);
     if (!error) {
       setLeads(leads.map((l) => l.id === id ? { ...l, status } : l));
+      if (selectedLead?.id === id) setSelectedLead({ ...selectedLead, status });
     }
   }
 
@@ -52,13 +56,19 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
     const { error } = await supabase.from("leads").delete().eq("id", id);
     if (!error) {
       setLeads(leads.filter((l) => l.id !== id));
+      if (selectedLead?.id === id) setSelectedLead(null);
     }
   }
 
-  const filtered = filter === "all" ? leads : leads.filter((l) => l.status === filter);
+  const filtered = leads
+    .filter((l) => filter === "all" || l.status === filter)
+    .filter((l) => !searchQuery || `${l.company_name} ${l.contact_name} ${l.contact_title} ${l.company_industry}`.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  const isHot = (lead: Lead) => lead.signals_matched?.[0]?.source_url;
 
   return (
     <div>
+      {/* Filters */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-2">
           {(["all", "discovered", "validated"] as const).map((f) => (
@@ -70,20 +80,26 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
             </button>
           ))}
         </div>
-        {leads.length > 0 && (
-          <button
-            onClick={async () => {
-              if (!confirm(`Delete all ${filtered.length} ${filter === "all" ? "" : filter + " "}leads? This cannot be undone.`)) return;
-              const idsToDelete = filtered.map((l) => l.id);
-              await Promise.all(idsToDelete.map((id) => supabase.from("leads").delete().eq("id", id)));
-              setLeads(leads.filter((l) => !idsToDelete.includes(l.id)));
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-danger bg-danger/10 hover:bg-danger/20 transition-colors"
-          >
-            <X className="w-3.5 h-3.5" />
-            Clear {filter === "all" ? "All" : filter.charAt(0).toUpperCase() + filter.slice(1)} ({filtered.length})
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary w-48"
+              placeholder="Search leads..." />
+          </div>
+          {leads.length > 0 && (
+            <button
+              onClick={async () => {
+                if (!confirm(`Delete all ${filtered.length} leads?`)) return;
+                await Promise.all(filtered.map((l) => supabase.from("leads").delete().eq("id", l.id)));
+                setLeads(leads.filter((l) => !filtered.find((f) => f.id === l.id)));
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-danger bg-danger/10 hover:bg-danger/20"
+            >
+              <X className="w-3.5 h-3.5" /> Clear ({filtered.length})
+            </button>
+          )}
+        </div>
       </div>
 
       {!filtered.length ? (
@@ -91,188 +107,253 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
           <p className="text-muted">No leads to validate. Run the pipeline to discover new leads.</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map((lead) => (
-            <div key={lead.id} className="bg-card border border-border rounded-xl overflow-hidden">
-              {/* Header */}
-              <div className="p-4 flex items-center justify-between cursor-pointer" onClick={() => setExpandedId(expandedId === lead.id ? null : lead.id)}>
-                <div className="flex-1">
-                  <div className="flex items-center gap-3">
-                    <h3 className="font-semibold">{lead.company_name}</h3>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${
-                      lead.status === "discovered" ? "bg-warning/10 text-warning" : "bg-success/10 text-success"
-                    }`}>{lead.status}</span>
-                    {/* Source indicator */}
-                    {lead.signals_matched?.[0]?.source_url ? (
-                      <span className="text-xs bg-red-500/10 text-red-600 px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <Flame className="w-3 h-3" /> HOT — News
+        <div className="flex gap-6">
+          {/* Lead Cards Grid */}
+          <div className={`grid grid-cols-1 ${selectedLead ? "md:grid-cols-1 w-1/3" : "md:grid-cols-2 lg:grid-cols-3"} gap-3 transition-all`}>
+            {filtered.map((lead) => (
+              <div
+                key={lead.id}
+                onClick={() => setSelectedLead(lead)}
+                className={`bg-card border rounded-xl p-4 cursor-pointer transition-all hover:shadow-md ${
+                  selectedLead?.id === lead.id ? "border-primary ring-2 ring-primary/20" : "border-border hover:border-primary/50"
+                }`}
+              >
+                {/* Source + Status badges */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    {isHot(lead) ? (
+                      <span className="text-[10px] font-semibold bg-red-500 text-white px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                        <Flame className="w-2.5 h-2.5" /> HOT
                       </span>
                     ) : (
-                      <span className="text-xs bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span className="text-[10px] font-semibold bg-blue-500 text-white px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                        <Snowflake className="w-2.5 h-2.5" /> COLD
+                      </span>
+                    )}
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                      lead.status === "discovered" ? "bg-warning/10 text-warning" : "bg-success/10 text-success"
+                    }`}>{lead.status}</span>
+                  </div>
+                  {lead.signals_matched?.[0] && (
+                    <span className="text-[10px] text-muted">
+                      {Math.round(lead.signals_matched[0].confidence * 100)}%
+                    </span>
+                  )}
+                </div>
+
+                {/* Company + Contact */}
+                <h3 className="font-semibold text-sm">{lead.company_name}</h3>
+                <p className="text-xs text-muted mt-0.5">
+                  {lead.contact_name} — {lead.contact_title}
+                </p>
+
+                {/* Signal badges */}
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {lead.signals_matched?.slice(0, 2).map((s, i) => (
+                    <span key={i} className="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full">
+                      {s.signal_name}
+                    </span>
+                  ))}
+                  {(lead.signals_matched?.length ?? 0) > 2 && (
+                    <span className="text-[10px] text-muted">+{lead.signals_matched.length - 2}</span>
+                  )}
+                </div>
+
+                {/* Contact info indicators */}
+                <div className="flex items-center gap-2 mt-2 text-muted">
+                  {lead.contact_email && <Mail className="w-3 h-3 text-success" />}
+                  {lead.contact_phone && <Phone className="w-3 h-3 text-success" />}
+                  {lead.contact_linkedin && <Linkedin className="w-3 h-3 text-success" />}
+                  {lead.company_website && <Globe className="w-3 h-3 text-success" />}
+                </div>
+
+                {/* Client tag */}
+                {lead.client_niches && (
+                  <p className="text-[10px] text-muted mt-2 truncate">
+                    {lead.client_niches.profiles?.company_name || lead.client_niches.profiles?.full_name} — {lead.client_niches.name}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Detail Panel */}
+          {selectedLead && (
+            <div className="flex-1 bg-card border border-border rounded-xl overflow-y-auto max-h-[calc(100vh-200px)] sticky top-24">
+              {/* Header */}
+              <div className="p-5 border-b border-border">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    {isHot(selectedLead) ? (
+                      <span className="text-xs font-semibold bg-red-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <Flame className="w-3 h-3" /> HOT — News Signal
+                      </span>
+                    ) : (
+                      <span className="text-xs font-semibold bg-blue-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1">
                         <Snowflake className="w-3 h-3" /> COLD — Database
                       </span>
                     )}
-                    {lead.client_niches && (
-                      <span className="text-xs bg-primary-light text-primary px-2 py-0.5 rounded-full">
-                        {lead.client_niches.profiles?.company_name || lead.client_niches.profiles?.full_name} — {lead.client_niches.name}
-                      </span>
-                    )}
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      selectedLead.status === "discovered" ? "bg-warning/10 text-warning" : "bg-success/10 text-success"
+                    }`}>{selectedLead.status}</span>
                   </div>
-                  <p className="text-sm text-muted mt-1">
-                    <span className="font-medium">{lead.contact_name}</span> — {lead.contact_title}
-                    {lead.company_industry !== "Unknown" && ` | ${lead.company_industry}`}
-                    {lead.company_location && ` | ${lead.company_location}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {lead.status === "discovered" && (
-                    <button onClick={(e) => { e.stopPropagation(); updateLeadStatus(lead.id, "validated"); }}
-                      className="p-2 rounded-lg bg-success/10 text-success hover:bg-success/20" title="Validate">
-                      <Check className="w-4 h-4" />
-                    </button>
-                  )}
-                  {lead.status === "validated" && (
-                    <button onClick={(e) => { e.stopPropagation(); updateLeadStatus(lead.id, "published"); }}
-                      className="p-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20" title="Publish to Client">
-                      <Eye className="w-4 h-4" />
-                    </button>
-                  )}
-                  <button onClick={(e) => { e.stopPropagation(); rejectLead(lead.id); }}
-                    className="p-2 rounded-lg bg-danger/10 text-danger hover:bg-danger/20" title="Reject">
+                  <button onClick={() => setSelectedLead(null)} className="text-muted hover:text-foreground">
                     <X className="w-4 h-4" />
                   </button>
-                  {expandedId === lead.id ? <ChevronUp className="w-4 h-4 text-muted" /> : <ChevronDown className="w-4 h-4 text-muted" />}
+                </div>
+
+                <h2 className="text-xl font-bold">{selectedLead.company_name}</h2>
+                <p className="text-sm text-muted mt-1">{selectedLead.contact_name} — {selectedLead.contact_title}</p>
+
+                {/* Action Buttons */}
+                <div className="flex items-center gap-2 mt-4">
+                  {selectedLead.status === "discovered" && (
+                    <button onClick={() => updateLeadStatus(selectedLead.id, "validated")}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-success text-white text-sm font-medium hover:bg-success/90">
+                      <Check className="w-3.5 h-3.5" /> Validate
+                    </button>
+                  )}
+                  {selectedLead.status === "validated" && (
+                    <button onClick={() => updateLeadStatus(selectedLead.id, "published")}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover">
+                      <Eye className="w-3.5 h-3.5" /> Publish to Client
+                    </button>
+                  )}
+                  <button onClick={() => rejectLead(selectedLead.id)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-danger/10 text-danger text-sm font-medium hover:bg-danger/20">
+                    <X className="w-3.5 h-3.5" /> Reject
+                  </button>
                 </div>
               </div>
 
-              {/* Expanded Detail */}
-              {expandedId === lead.id && (
-                <div className="border-t border-border p-5 bg-background/50 space-y-5">
-
-                  {/* Company & Contact Info */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <h4 className="text-sm font-semibold flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" /> Company</h4>
-                      <div className="text-sm space-y-1">
-                        <p className="font-medium">{lead.company_name}</p>
-                        {lead.company_website && (
-                          <p className="flex items-center gap-1.5">
-                            <Globe className="w-3 h-3 text-muted" />
-                            <a href={lead.company_website} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{lead.company_website}</a>
-                          </p>
-                        )}
-                        {lead.company_industry !== "Unknown" && <p className="text-muted">Industry: {lead.company_industry}</p>}
-                        {lead.company_size && <p className="text-muted flex items-center gap-1.5"><Users className="w-3 h-3" /> {lead.company_size} employees</p>}
-                        {lead.company_location && <p className="text-muted flex items-center gap-1.5"><MapPin className="w-3 h-3" /> {lead.company_location}</p>}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <h4 className="text-sm font-semibold">Contact</h4>
-                      <div className="text-sm space-y-1">
-                        <p className="font-medium">{lead.contact_name} — {lead.contact_title}</p>
-                        {lead.contact_email && (
-                          <p className="flex items-center gap-1.5">
-                            <Mail className="w-3 h-3 text-muted" />
-                            <a href={`mailto:${lead.contact_email}`} className="text-primary hover:underline">{lead.contact_email}</a>
-                          </p>
-                        )}
-                        {lead.contact_phone && (
-                          <p className="flex items-center gap-1.5"><Phone className="w-3 h-3 text-muted" /> {lead.contact_phone}</p>
-                        )}
-                        {lead.contact_linkedin && (
-                          <p className="flex items-center gap-1.5">
-                            <Linkedin className="w-3 h-3 text-muted" />
-                            <a href={lead.contact_linkedin} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">LinkedIn Profile</a>
-                          </p>
-                        )}
-                        {!lead.contact_email && !lead.contact_phone && !lead.contact_linkedin && (
-                          <p className="text-muted italic">No contact details available</p>
-                        )}
-                      </div>
+              <div className="p-5 space-y-5">
+                {/* Company & Contact */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Company</h4>
+                    <div className="space-y-1.5 text-sm">
+                      {selectedLead.company_website && (
+                        <a href={selectedLead.company_website} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-primary hover:underline">
+                          <Globe className="w-3.5 h-3.5" /> {selectedLead.company_website}
+                        </a>
+                      )}
+                      {selectedLead.company_industry !== "Unknown" && (
+                        <p className="flex items-center gap-1.5 text-muted"><Building2 className="w-3.5 h-3.5" /> {selectedLead.company_industry}</p>
+                      )}
+                      {selectedLead.company_size && <p className="text-muted">{selectedLead.company_size} employees</p>}
+                      {selectedLead.company_location && (
+                        <p className="flex items-center gap-1.5 text-muted"><MapPin className="w-3.5 h-3.5" /> {selectedLead.company_location}</p>
+                      )}
                     </div>
                   </div>
-
-                  {/* Contact Summary */}
-                  {lead.contact_summary && (
-                    <div>
-                      <h4 className="text-sm font-semibold mb-1">Contact Background</h4>
-                      <p className="text-sm text-muted">{lead.contact_summary}</p>
+                  <div>
+                    <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Contact</h4>
+                    <div className="space-y-1.5 text-sm">
+                      <p className="font-medium">{selectedLead.contact_name}</p>
+                      <p className="text-muted">{selectedLead.contact_title}</p>
+                      {selectedLead.contact_email && (
+                        <a href={`mailto:${selectedLead.contact_email}`} className="flex items-center gap-1.5 text-primary hover:underline">
+                          <Mail className="w-3.5 h-3.5" /> {selectedLead.contact_email}
+                        </a>
+                      )}
+                      {selectedLead.contact_phone && (
+                        <p className="flex items-center gap-1.5 text-muted"><Phone className="w-3.5 h-3.5" /> {selectedLead.contact_phone}</p>
+                      )}
+                      {selectedLead.contact_linkedin && (
+                        <a href={selectedLead.contact_linkedin} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-primary hover:underline">
+                          <Linkedin className="w-3.5 h-3.5" /> LinkedIn Profile
+                        </a>
+                      )}
                     </div>
-                  )}
-
-                  {/* Justification */}
-                  <div>
-                    <h4 className="text-sm font-semibold mb-1">Why This Lead</h4>
-                    <p className="text-sm text-muted">{lead.justification || "No justification provided"}</p>
                   </div>
+                </div>
 
-                  {/* Signals */}
+                {/* Contact Background */}
+                {selectedLead.contact_summary && (
                   <div>
-                    <h4 className="text-sm font-semibold mb-2">Signals Matched ({lead.signals_matched?.length || 0})</h4>
-                    <div className="space-y-2">
-                      {lead.signals_matched?.map((s, i) => (
-                        <div key={i} className="flex items-start gap-2 text-sm">
-                          <span className="shrink-0 text-xs bg-accent/10 text-accent px-2 py-0.5 rounded-full mt-0.5">
+                    <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Contact Background</h4>
+                    <p className="text-sm text-muted bg-background rounded-lg p-3">{selectedLead.contact_summary}</p>
+                  </div>
+                )}
+
+                {/* Why This Lead */}
+                <div>
+                  <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">Why This Lead</h4>
+                  <p className="text-sm">{selectedLead.justification}</p>
+                </div>
+
+                {/* Signals */}
+                <div>
+                  <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">
+                    Signals ({selectedLead.signals_matched?.length || 0})
+                  </h4>
+                  <div className="space-y-2">
+                    {selectedLead.signals_matched?.map((s, i) => (
+                      <div key={i} className="bg-background rounded-lg p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">{s.signal_name}</span>
+                          <span className="text-xs bg-accent/10 text-accent px-2 py-0.5 rounded-full">
                             {Math.round(s.confidence * 100)}%
                           </span>
-                          <div>
-                            <span className="font-medium">{s.signal_name}</span>
-                            <span className="text-muted"> — {s.evidence}</span>
-                            {s.source_url && (
-                              <a href={s.source_url} target="_blank" rel="noopener noreferrer"
-                                className="flex items-center gap-1 text-xs text-primary hover:underline mt-0.5">
-                                <ExternalLink className="w-3 h-3" /> Source
-                              </a>
-                            )}
-                          </div>
+                        </div>
+                        <p className="text-xs text-muted mt-1">{s.evidence}</p>
+                        {s.source_url && (
+                          <a href={s.source_url} target="_blank" rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-xs text-primary hover:underline mt-1">
+                            <ExternalLink className="w-3 h-3" /> View Source
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Approach Strategies */}
+                {selectedLead.approach_strategies?.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">
+                      Approach Strategies ({selectedLead.approach_strategies.length})
+                    </h4>
+                    <div className="space-y-2">
+                      {selectedLead.approach_strategies.map((s, i) => (
+                        <div key={i} className="bg-background rounded-lg p-3">
+                          <h5 className="text-sm font-medium">{s.name}</h5>
+                          <p className="text-xs text-muted mt-1">{s.description}</p>
+                          <ul className="mt-2 space-y-0.5">
+                            {s.talking_points?.map((p, j) => (
+                              <li key={j} className="text-xs text-muted flex items-start gap-1.5">
+                                <ChevronRight className="w-3 h-3 mt-0.5 text-primary shrink-0" />{p}
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                       ))}
                     </div>
                   </div>
+                )}
 
-                  {/* Approach Strategies */}
-                  {lead.approach_strategies?.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold mb-2">Approach Strategies ({lead.approach_strategies.length})</h4>
-                      <div className="grid gap-3">
-                        {lead.approach_strategies.map((strategy, i) => (
-                          <div key={i} className="border border-border rounded-lg p-3">
-                            <h5 className="text-sm font-medium">{strategy.name}</h5>
-                            <p className="text-xs text-muted mt-1">{strategy.description}</p>
-                            {strategy.talking_points?.length > 0 && (
-                              <ul className="mt-2 space-y-1">
-                                {strategy.talking_points.map((point, j) => (
-                                  <li key={j} className="text-xs text-muted flex items-start gap-1.5">
-                                    <span className="text-primary mt-0.5">•</span>{point}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                        ))}
-                      </div>
+                {/* Email Templates */}
+                {selectedLead.email_templates?.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-2">
+                      Email Templates ({selectedLead.email_templates.length})
+                    </h4>
+                    <div className="space-y-2">
+                      {selectedLead.email_templates.map((e, i) => (
+                        <div key={i} className="bg-background rounded-lg p-3">
+                          <span className="text-[10px] bg-primary-light text-primary px-1.5 py-0.5 rounded-full">{e.approach}</span>
+                          <p className="text-sm font-medium mt-1.5">Subject: {e.subject}</p>
+                          <p className="text-xs text-muted mt-1.5 whitespace-pre-wrap">{e.body}</p>
+                        </div>
+                      ))}
                     </div>
-                  )}
-
-                  {/* Email Templates */}
-                  {lead.email_templates?.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold mb-2">Email Templates ({lead.email_templates.length})</h4>
-                      <div className="space-y-3">
-                        {lead.email_templates.map((email, i) => (
-                          <div key={i} className="border border-border rounded-lg p-3">
-                            <span className="text-xs bg-primary-light text-primary px-2 py-0.5 rounded-full">{email.approach}</span>
-                            <p className="text-sm font-medium mt-2">Subject: {email.subject}</p>
-                            <p className="text-xs text-muted mt-2 whitespace-pre-wrap bg-background rounded p-2">{email.body}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
             </div>
-          ))}
+          )}
         </div>
       )}
     </div>
