@@ -48,9 +48,22 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
           (sum: number, r: Record<string, number>) => sum + (r.leads || 0),
           0
         ) ?? 0;
+        const stepDetails = data.results?.map(
+          (r: Record<string, unknown>) => {
+            const parts = [`${r.niche}`];
+            if (r.companies !== undefined) parts.push(`${r.companies} companies sourced`);
+            if (r.signals !== undefined) parts.push(`${r.signals} with signals`);
+            if (r.enriched !== undefined) parts.push(`${r.enriched} enriched`);
+            parts.push(`${r.leads ?? 0} leads`);
+            if (r.detail) parts.push(`(${r.detail})`);
+            if (r.step) parts.push(`[stopped at: ${r.step}]`);
+            return parts.join(" → ");
+          }
+        ).join("\n") ?? "";
+
         setResult({
-          success: true,
-          message: `Pipeline complete. ${totalLeads} leads discovered across ${data.results?.length ?? 0} niches.`,
+          success: totalLeads > 0,
+          message: `Pipeline complete. ${totalLeads} leads discovered.\n${stepDetails}`,
         });
       } else {
         setResult({
@@ -123,7 +136,7 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
           ) : (
             <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
           )}
-          {result.message}
+          <span className="whitespace-pre-wrap">{result.message}</span>
         </div>
       )}
     </div>

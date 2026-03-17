@@ -82,7 +82,7 @@ export async function POST(request: Request) {
       console.log(`  Sourced ${companies.length} companies`);
 
       if (companies.length === 0) {
-        results.push({ niche: niche.name, companies: 0, leads: 0 });
+        results.push({ niche: niche.name, step: "sourcing", companies: 0, leads: 0, detail: "Apollo returned no companies" });
         continue;
       }
 
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
       console.log(`  ${signalResults.length} companies with matching signals`);
 
       if (signalResults.length === 0) {
-        results.push({ niche: niche.name, companies: companies.length, leads: 0 });
+        results.push({ niche: niche.name, step: "signals", companies: companies.length, signals: 0, leads: 0, detail: "No buying signals detected" });
         continue;
       }
 
@@ -111,9 +111,11 @@ export async function POST(request: Request) {
       if (enrichedLeads.length === 0) {
         results.push({
           niche: niche.name,
+          step: "enrichment",
           companies: companies.length,
           signals: signalResults.length,
           leads: 0,
+          detail: "No contacts found for matched companies",
         });
         continue;
       }
