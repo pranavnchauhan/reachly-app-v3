@@ -15,7 +15,14 @@ export default async function ClientsPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6">Clients</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">Clients</h1>
+        <Link href="/admin/clients/new"
+          className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors">
+          <Users className="w-4 h-4" />
+          New Client
+        </Link>
+      </div>
 
       {!clients?.length ? (
         <div className="bg-card border border-border rounded-xl p-12 text-center">
