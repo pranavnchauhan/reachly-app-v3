@@ -86,6 +86,11 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
                     <span className={`text-xs px-2 py-0.5 rounded-full ${
                       lead.status === "discovered" ? "bg-warning/10 text-warning" : "bg-success/10 text-success"
                     }`}>{lead.status}</span>
+                    {lead.client_niches && (
+                      <span className="text-xs bg-primary-light text-primary px-2 py-0.5 rounded-full">
+                        {lead.client_niches.profiles?.company_name || lead.client_niches.profiles?.full_name} — {lead.client_niches.name}
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm text-muted mt-1">
                     <span className="font-medium">{lead.contact_name}</span> — {lead.contact_title}
