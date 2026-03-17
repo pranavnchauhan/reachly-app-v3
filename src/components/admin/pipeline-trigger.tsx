@@ -78,7 +78,7 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
           success: totalLeads > 0,
           message: `Pipeline complete. ${totalLeads} leads discovered.\n${stepDetails}`,
         });
-        if (totalLeads > 0) router.refresh();
+        if (totalLeads > 0) window.location.reload();
       } else {
         setResult({
           success: false,
