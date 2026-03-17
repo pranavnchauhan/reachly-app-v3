@@ -9,7 +9,7 @@ import type { Signal } from "@/types/database";
 // Protect cron endpoint with a secret
 const CRON_SECRET = process.env.CRON_SECRET;
 
-export const maxDuration = 300; // 5 minutes max (Vercel Pro)
+export const maxDuration = 300; // 5 minutes max (requires Vercel Pro)
 
 export async function POST(request: Request) {
   // Auth: either cron secret or admin user
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
 
       console.log(`Processing niche: ${niche.name} (${niche.id})`);
 
-      // Step 1: Source companies
+      // Step 1: Source companies (limit to 15 to stay within timeout)
       const companies = await sourceCompanies({
         industries: template.industries || [],
         keywords: template.keywords || [],
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
         employee_max: niche.employee_max ?? template.employee_max,
         geography: niche.geography || [],
         excluded_companies: niche.excluded_companies || [],
-      });
+      }, 15);
 
       console.log(`  Sourced ${companies.length} companies`);
 
@@ -92,7 +92,8 @@ export async function POST(request: Request) {
         ? allSignals.filter((s) => niche.enabled_signals.includes(s.id))
         : allSignals;
 
-      const signalResults = await findSignals(companies, enabledSignals);
+      // Only check top 10 companies for signals to stay within timeout
+      const signalResults = await findSignals(companies.slice(0, 10), enabledSignals);
       console.log(`  ${signalResults.length} companies with matching signals`);
 
       if (signalResults.length === 0) {
@@ -103,7 +104,7 @@ export async function POST(request: Request) {
       // Step 3: Enrich contacts (top 20 by signal score)
       let enrichedLeads: Awaited<ReturnType<typeof enrichContacts>> = [];
       try {
-        const topResults = signalResults.slice(0, 20);
+        const topResults = signalResults.slice(0, 5);
         enrichedLeads = await enrichContacts(
           topResults,
           template.target_titles || []
@@ -137,7 +138,7 @@ export async function POST(request: Request) {
       // Step 4: Deep research (top 10)
       let researchedLeads: Awaited<ReturnType<typeof deepResearch>> = [];
       try {
-        const topLeads = enrichedLeads.slice(0, 10);
+        const topLeads = enrichedLeads.slice(0, 3);
         researchedLeads = await deepResearch(
           topLeads,
           template.description || template.name

@@ -41,7 +41,18 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        setResult({
+          success: false,
+          message: `Server error (likely timeout). Response: ${responseText.slice(0, 200)}`,
+        });
+        setRunning(false);
+        return;
+      }
 
       if (response.ok) {
         const totalLeads = data.results?.reduce(
