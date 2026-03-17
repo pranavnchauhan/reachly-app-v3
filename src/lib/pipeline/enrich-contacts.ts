@@ -94,10 +94,9 @@ async function enrichPerson(
   const lastName = (person.last_name as string) || "";
   const personId = person.id as string;
 
-  // Use people/match to get email + phone (costs Apollo credits)
-  const matchParams: Record<string, unknown> = {
-    reveal_phone_number: true,
-  };
+  // Use people/match to get email (costs Apollo credits)
+  // Note: phone numbers require webhook — not supported yet
+  const matchParams: Record<string, unknown> = {};
 
   // Prefer matching by Apollo ID
   if (personId) {

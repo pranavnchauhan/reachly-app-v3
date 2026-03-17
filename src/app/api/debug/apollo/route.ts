@@ -44,7 +44,6 @@ export async function GET() {
       headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
       body: JSON.stringify({
         id: person.id,
-        reveal_phone_number: true,
       }),
     });
     const matchText = await matchRes.text();
