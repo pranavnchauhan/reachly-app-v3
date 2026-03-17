@@ -136,7 +136,7 @@ If no companies match, respond with: {"companies": []}`;
       location: (c.location as string) || null,
       signal_id: signal.id,
       signal_name: signal.name,
-      evidence: (c.evidence as string) || "",
+      evidence: ((c.evidence as string) || "").replace(/\*\*/g, "").replace(/\[[\d,\s]+\]/g, "").trim(),
       source_url: (c.source_url as string) || null,
       confidence: Math.min(1, Math.max(0, (c.confidence as number) || 0.5)),
       source: "perplexity" as const,

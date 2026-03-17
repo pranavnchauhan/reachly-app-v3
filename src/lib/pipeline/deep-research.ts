@@ -76,7 +76,13 @@ Provide a brief professional summary (3-4 sentences) covering their career backg
 
   if (!ok) return "";
   const choices = data.choices as Record<string, Record<string, string>>[] | undefined;
-  return choices?.[0]?.message?.content || "";
+  const raw = choices?.[0]?.message?.content || "";
+  // Strip markdown formatting and citation references
+  return raw
+    .replace(/\*\*/g, "")
+    .replace(/\[[\d,\s]+\]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 async function generateAnalysis(
