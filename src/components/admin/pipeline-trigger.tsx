@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Play, Loader2, CheckCircle, XCircle } from "lucide-react";
 
@@ -10,6 +11,7 @@ interface Niche {
 }
 
 export function PipelineTrigger({ niches }: { niches: Niche[] }) {
+  const router = useRouter();
   const [selectedNiche, setSelectedNiche] = useState<string>("all");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -76,6 +78,7 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
           success: totalLeads > 0,
           message: `Pipeline complete. ${totalLeads} leads discovered.\n${stepDetails}`,
         });
+        if (totalLeads > 0) router.refresh();
       } else {
         setResult({
           success: false,
