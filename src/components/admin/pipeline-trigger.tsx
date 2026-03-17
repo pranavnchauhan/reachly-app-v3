@@ -62,9 +62,9 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
         const stepDetails = data.results?.map(
           (r: Record<string, unknown>) => {
             const parts = [`${r.niche}`];
-            if (r.companies !== undefined) parts.push(`${r.companies} companies sourced`);
-            if (r.signals !== undefined) parts.push(`${r.signals} with signals`);
+            if (r.hot !== undefined || r.cold !== undefined) parts.push(`🔥 ${r.hot ?? 0} hot + 🧊 ${r.cold ?? 0} cold`);
             if (r.enriched !== undefined) parts.push(`${r.enriched} enriched`);
+            if (r.researched !== undefined) parts.push(`${r.researched} researched`);
             parts.push(`${r.leads ?? 0} leads`);
             if (r.detail) parts.push(`(${r.detail})`);
             if (r.step) parts.push(`[stopped at: ${r.step}]`);

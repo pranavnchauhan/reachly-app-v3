@@ -26,11 +26,14 @@ export interface EmailTemplate {
   body: string;
 }
 
+export type LeadSource = "perplexity" | "apollo";
+
 export interface MatchedSignal {
   signal_id: string;
   signal_name: string;
   evidence: string;
   confidence: number;
+  source_url?: string | null;
 }
 
 export interface ApproachStrategy {

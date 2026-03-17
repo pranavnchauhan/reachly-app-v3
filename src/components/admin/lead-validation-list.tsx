@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Check, X, Eye, ChevronDown, ChevronUp, Mail, Linkedin, Globe, Phone, Building2, MapPin, Users } from "lucide-react";
+import { Check, X, Eye, ChevronDown, ChevronUp, Mail, Linkedin, Globe, Phone, Building2, MapPin, Users, Flame, Snowflake, ExternalLink } from "lucide-react";
 import type { MatchedSignal, ApproachStrategy, GeneratedEmail } from "@/types/database";
 
 interface Lead {
@@ -86,6 +86,16 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
                     <span className={`text-xs px-2 py-0.5 rounded-full ${
                       lead.status === "discovered" ? "bg-warning/10 text-warning" : "bg-success/10 text-success"
                     }`}>{lead.status}</span>
+                    {/* Source indicator */}
+                    {lead.signals_matched?.[0]?.source_url ? (
+                      <span className="text-xs bg-red-500/10 text-red-600 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <Flame className="w-3 h-3" /> HOT — News
+                      </span>
+                    ) : (
+                      <span className="text-xs bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <Snowflake className="w-3 h-3" /> COLD — Database
+                      </span>
+                    )}
                     {lead.client_niches && (
                       <span className="text-xs bg-primary-light text-primary px-2 py-0.5 rounded-full">
                         {lead.client_niches.profiles?.company_name || lead.client_niches.profiles?.full_name} — {lead.client_niches.name}
@@ -192,6 +202,12 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
                           <div>
                             <span className="font-medium">{s.signal_name}</span>
                             <span className="text-muted"> — {s.evidence}</span>
+                            {s.source_url && (
+                              <a href={s.source_url} target="_blank" rel="noopener noreferrer"
+                                className="flex items-center gap-1 text-xs text-primary hover:underline mt-0.5">
+                                <ExternalLink className="w-3 h-3" /> Source
+                              </a>
+                            )}
                           </div>
                         </div>
                       ))}

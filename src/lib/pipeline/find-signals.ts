@@ -11,6 +11,7 @@ export interface SignalResult {
     signal_name: string;
     evidence: string;
     confidence: number;
+    source_url?: string | null;
   }[];
   total_score: number;
 }

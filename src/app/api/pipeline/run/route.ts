@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sourceCompanies } from "@/lib/pipeline/source-companies";
-import { findSignals } from "@/lib/pipeline/find-signals";
+import { discoverSignals } from "@/lib/pipeline/discover-signals";
+import { apolloFallback } from "@/lib/pipeline/apollo-fallback";
 import { enrichContacts } from "@/lib/pipeline/enrich-contacts";
 import { deepResearch } from "@/lib/pipeline/deep-research";
 import type { Signal } from "@/types/database";
+import type { SignalResult } from "@/lib/pipeline/find-signals";
 
-// Protect cron endpoint with a secret
 const CRON_SECRET = process.env.CRON_SECRET;
 
-export const maxDuration = 300; // 5 minutes max (requires Vercel Pro)
+export const maxDuration = 300; // 5 minutes (Vercel Pro)
 
 export async function POST(request: Request) {
   // Auth: either cron secret or admin user
@@ -17,22 +17,13 @@ export async function POST(request: Request) {
   const { nicheId, secret } = await request.json().catch(() => ({ nicheId: null, secret: null }));
 
   if (CRON_SECRET && secret !== CRON_SECRET && authHeader !== `Bearer ${CRON_SECRET}`) {
-    // Check if it's an admin making a manual request
     const adminClient = createAdminClient();
     const token = authHeader?.replace("Bearer ", "");
     if (token) {
       const { data: { user } } = await adminClient.auth.getUser(token);
-      if (!user) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      const { data: profile } = await adminClient
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-      if (profile?.role !== "admin") {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
+      if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      const { data: profile } = await adminClient.from("profiles").select("role").eq("id", user.id).single();
+      if (profile?.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     } else {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -41,23 +32,12 @@ export async function POST(request: Request) {
   const supabase = createAdminClient();
 
   try {
-    // Get active client niches to process
-    let query = supabase
-      .from("client_niches")
-      .select("*, niche_templates(*)")
-      .eq("is_active", true);
-
-    if (nicheId) {
-      query = query.eq("id", nicheId);
-    }
-
+    let query = supabase.from("client_niches").select("*, niche_templates(*)").eq("is_active", true);
+    if (nicheId) query = query.eq("id", nicheId);
     const { data: niches, error: nicheError } = await query;
 
     if (nicheError || !niches?.length) {
-      return NextResponse.json({
-        message: "No active niches to process",
-        error: nicheError?.message,
-      });
+      return NextResponse.json({ message: "No active niches to process", error: nicheError?.message });
     }
 
     const results = [];
@@ -69,163 +49,156 @@ export async function POST(request: Request) {
 
       console.log(`Processing niche: ${niche.name} (${niche.id})`);
 
-      // Step 1: Source companies (limit to 15 to stay within timeout)
-      const companies = await sourceCompanies({
-        industries: template.industries || [],
-        keywords: template.keywords || [],
-        employee_min: niche.employee_min ?? template.employee_min,
-        employee_max: niche.employee_max ?? template.employee_max,
-        geography: niche.geography || [],
-        excluded_companies: niche.excluded_companies || [],
-      }, 15);
-
-      console.log(`  Sourced ${companies.length} companies`);
-
-      if (companies.length === 0) {
-        results.push({ niche: niche.name, step: "sourcing", companies: 0, leads: 0, detail: "Apollo returned no companies" });
-        continue;
-      }
-
-      // Step 2: Detect signals
+      // Get enabled signals (max 5 for API efficiency)
       const allSignals = (template.signals as Signal[]) || [];
       const enabledSignals = niche.enabled_signals?.length
         ? allSignals.filter((s) => niche.enabled_signals.includes(s.id))
         : allSignals;
+      const signalsToSearch = enabledSignals.slice(0, 5);
 
-      // Only check top 10 companies for signals to stay within timeout
-      const signalResults = await findSignals(companies.slice(0, 10), enabledSignals);
-      console.log(`  ${signalResults.length} companies with matching signals`);
+      // ─── Step 1: Signal-first discovery (Perplexity) ───────────────
+      let discovered = await discoverSignals(
+        signalsToSearch,
+        niche.geography || []
+      );
+      console.log(`  Perplexity found ${discovered.length} companies from news`);
 
-      if (signalResults.length === 0) {
-        results.push({ niche: niche.name, step: "signals", companies: companies.length, signals: 0, leads: 0, detail: "No buying signals detected" });
-        continue;
-      }
+      const hotCount = discovered.length;
 
-      // Step 3: Enrich contacts (top 20 by signal score)
-      let enrichedLeads: Awaited<ReturnType<typeof enrichContacts>> = [];
-      try {
-        const topResults = signalResults.slice(0, 5);
-        enrichedLeads = await enrichContacts(
-          topResults,
-          template.target_titles || []
+      // ─── Step 2: Apollo fallback if < 20 ───────────────────────────
+      if (discovered.length < 20) {
+        discovered = await apolloFallback(
+          discovered,
+          template.keywords || [],
+          template.industries || [],
+          niche.geography || []
         );
-        console.log(`  ${enrichedLeads.length} leads with contacts`);
-      } catch (err) {
-        console.error("  Enrichment error:", err);
-        results.push({
-          niche: niche.name,
-          step: "enrichment",
-          companies: companies.length,
-          signals: signalResults.length,
-          leads: 0,
-          detail: `Enrichment error: ${String(err).slice(0, 100)}`,
-        });
+        console.log(`  After Apollo fallback: ${discovered.length} total (${discovered.length - hotCount} cold)`);
+      }
+
+      if (discovered.length === 0) {
+        results.push({ niche: niche.name, step: "discovery", hot: 0, cold: 0, leads: 0, detail: "No companies found" });
         continue;
       }
+
+      // ─── Step 3: Enrich contacts (Apollo people/match) ─────────────
+      // Convert discovered companies to SignalResult format for enrichment
+      const signalResults: SignalResult[] = discovered.map((d) => ({
+        company: {
+          name: d.name,
+          domain: d.domain,
+          industry: d.industry || "Unknown",
+          employee_count: null,
+          location: d.location,
+          description: null,
+          apollo_id: "",
+        },
+        matched_signals: [{
+          signal_id: d.signal_id,
+          signal_name: d.signal_name,
+          evidence: d.evidence,
+          confidence: d.confidence,
+          source_url: d.source_url,
+        }],
+        total_score: d.confidence * 10,
+      }));
+
+      let enrichedLeads = await enrichContacts(signalResults, template.target_titles || []);
+      console.log(`  ${enrichedLeads.length} leads with contacts`);
 
       if (enrichedLeads.length === 0) {
         results.push({
           niche: niche.name,
           step: "enrichment",
-          companies: companies.length,
-          signals: signalResults.length,
+          hot: hotCount,
+          cold: discovered.length - hotCount,
           leads: 0,
-          detail: "No contacts found for matched companies",
+          detail: "No contacts found",
         });
         continue;
       }
 
-      // Step 4: Deep research (top 10)
-      let researchedLeads: Awaited<ReturnType<typeof deepResearch>> = [];
-      try {
-        const topLeads = enrichedLeads.slice(0, 3);
-        researchedLeads = await deepResearch(
-          topLeads,
-          template.description || template.name
-        );
-        console.log(`  ${researchedLeads.length} leads fully researched`);
-      } catch (err) {
-        console.error("  Deep research error:", err);
-        // Still save leads without deep research
-        researchedLeads = enrichedLeads.slice(0, 10).map((lead) => ({
+      // ─── Step 4: Deep research (Claude) — top 5 ───────────────────
+      let researchedLeads = await deepResearch(
+        enrichedLeads.slice(0, 5),
+        template.description || template.name
+      );
+      console.log(`  ${researchedLeads.length} leads fully researched`);
+
+      // Add remaining enriched leads without deep research
+      if (enrichedLeads.length > 5) {
+        const remaining = enrichedLeads.slice(5).map((lead) => ({
           ...lead,
           justification: "Signal-matched lead (research pending)",
           contact_summary: "",
           approach_strategies: [],
           email_templates: [],
         }));
+        researchedLeads = [...researchedLeads, ...remaining];
       }
 
-      // Step 5: Store as "discovered" leads
-      const leadsToInsert = researchedLeads.map((lead) => ({
-        client_niche_id: niche.id,
-        company_name: lead.company.name,
-        company_website: lead.company.domain
-          ? `https://${lead.company.domain}`
-          : null,
-        company_industry: lead.company.industry,
-        company_size: lead.company.employee_count?.toString() || null,
-        company_location: lead.company.location,
-        signals_matched: lead.matched_signals,
-        justification: lead.justification,
-        approach_strategies: lead.approach_strategies,
-        contact_name: lead.contact.name,
-        contact_title: lead.contact.title,
-        contact_email: lead.contact.email,
-        contact_phone: lead.contact.phone,
-        contact_linkedin: lead.contact.linkedin_url,
-        contact_summary: lead.contact_summary,
-        email_templates: lead.email_templates,
-        status: "discovered" as const,
-        batch_id: batchId,
-      }));
+      // ─── Step 5: Store leads ──────────────────────────────────────
+      const leadsToInsert = researchedLeads.map((lead, idx) => {
+        // Find the original discovered company to get source
+        const original = discovered.find(
+          (d) => d.name.toLowerCase() === lead.company.name.toLowerCase()
+        );
 
-      const { error: insertError } = await supabase
-        .from("leads")
-        .insert(leadsToInsert);
+        return {
+          client_niche_id: niche.id,
+          company_name: lead.company.name,
+          company_website: lead.company.domain ? `https://${lead.company.domain}` : null,
+          company_industry: lead.company.industry || "Unknown",
+          company_size: lead.company.employee_count?.toString() || null,
+          company_location: lead.company.location,
+          signals_matched: lead.matched_signals.map((s) => ({
+            ...s,
+            source_url: original?.source_url || s.source_url || null,
+          })),
+          justification: lead.justification,
+          approach_strategies: lead.approach_strategies,
+          contact_name: lead.contact.name,
+          contact_title: lead.contact.title,
+          contact_email: lead.contact.email,
+          contact_phone: lead.contact.phone,
+          contact_linkedin: lead.contact.linkedin_url,
+          contact_summary: lead.contact_summary,
+          email_templates: lead.email_templates,
+          status: "discovered" as const,
+          batch_id: batchId,
+          // Store source in signals_matched for now (lead_source field can be added to schema later)
+        };
+      });
 
-      if (insertError) {
-        console.error(`  Failed to insert leads:`, insertError);
-      }
+      const { error: insertError } = await supabase.from("leads").insert(leadsToInsert);
+      if (insertError) console.error("  Insert error:", insertError);
 
       results.push({
         niche: niche.name,
-        companies: companies.length,
-        signals: signalResults.length,
+        hot: hotCount,
+        cold: discovered.length - hotCount,
         enriched: enrichedLeads.length,
+        researched: Math.min(enrichedLeads.length, 5),
         leads: researchedLeads.length,
       });
     }
 
-    return NextResponse.json({
-      message: "Pipeline completed",
-      batch_id: batchId,
-      results,
-    });
+    return NextResponse.json({ message: "Pipeline completed", batch_id: batchId, results });
   } catch (error) {
     console.error("Pipeline error:", error);
-    return NextResponse.json(
-      { error: "Pipeline failed", details: String(error) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Pipeline failed", details: String(error) }, { status: 500 });
   }
 }
 
-// Also support GET for Vercel Cron
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
   if (CRON_SECRET && authHeader !== `Bearer ${CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Run for all active niches
-  const response = await POST(
-    new Request(request.url, {
-      method: "POST",
-      headers: { authorization: authHeader || "" },
-      body: JSON.stringify({ secret: CRON_SECRET }),
-    })
-  );
-
-  return response;
+  return POST(new Request(request.url, {
+    method: "POST",
+    headers: { authorization: authHeader || "" },
+    body: JSON.stringify({ secret: CRON_SECRET }),
+  }));
 }
