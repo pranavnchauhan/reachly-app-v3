@@ -53,10 +53,26 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
   }
 
   async function rejectLead(id: string) {
-    const { error } = await supabase.from("leads").delete().eq("id", id);
-    if (!error) {
+    const res = await fetch("/api/admin/delete-leads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ leadIds: [id] }),
+    });
+    if (res.ok) {
       setLeads(leads.filter((l) => l.id !== id));
       if (selectedLead?.id === id) setSelectedLead(null);
+    }
+  }
+
+  async function clearLeads(ids: string[]) {
+    const res = await fetch("/api/admin/delete-leads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ leadIds: ids }),
+    });
+    if (res.ok) {
+      setLeads(leads.filter((l) => !ids.includes(l.id)));
+      setSelectedLead(null);
     }
   }
 
@@ -91,8 +107,7 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
             <button
               onClick={async () => {
                 if (!confirm(`Delete all ${filtered.length} leads?`)) return;
-                await Promise.all(filtered.map((l) => supabase.from("leads").delete().eq("id", l.id)));
-                setLeads(leads.filter((l) => !filtered.find((f) => f.id === l.id)));
+                await clearLeads(filtered.map((l) => l.id));
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-danger bg-danger/10 hover:bg-danger/20"
             >
