@@ -156,12 +156,22 @@ Requirements:
     }),
   });
 
+  const responseText = await response.text();
+
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Claude API error: ${response.status} - ${error}`);
+    console.error(`Claude API error ${response.status}: ${responseText.slice(0, 200)}`);
+    // Return empty but don't throw — let other leads continue
+    return { justification: "", strategies: [], emails: [] };
   }
 
-  const data = await response.json();
+  let data;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    console.error(`Claude returned non-JSON: ${responseText.slice(0, 200)}`);
+    return { justification: "", strategies: [], emails: [] };
+  }
+
   const content = data.content?.[0]?.text || "";
 
   // Extract JSON from response
@@ -170,10 +180,14 @@ Requirements:
     return { justification: "", strategies: [], emails: [] };
   }
 
-  const parsed = JSON.parse(jsonMatch[0]);
-  return {
-    justification: parsed.justification || "",
-    strategies: parsed.strategies || [],
-    emails: parsed.emails || [],
-  };
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      justification: parsed.justification || "",
+      strategies: parsed.strategies || [],
+      emails: parsed.emails || [],
+    };
+  } catch {
+    return { justification: "", strategies: [], emails: [] };
+  }
 }

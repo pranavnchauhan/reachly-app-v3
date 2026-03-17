@@ -101,12 +101,26 @@ export async function POST(request: Request) {
       }
 
       // Step 3: Enrich contacts (top 20 by signal score)
-      const topResults = signalResults.slice(0, 20);
-      const enrichedLeads = await enrichContacts(
-        topResults,
-        template.target_titles || []
-      );
-      console.log(`  ${enrichedLeads.length} leads with contacts`);
+      let enrichedLeads: Awaited<ReturnType<typeof enrichContacts>> = [];
+      try {
+        const topResults = signalResults.slice(0, 20);
+        enrichedLeads = await enrichContacts(
+          topResults,
+          template.target_titles || []
+        );
+        console.log(`  ${enrichedLeads.length} leads with contacts`);
+      } catch (err) {
+        console.error("  Enrichment error:", err);
+        results.push({
+          niche: niche.name,
+          step: "enrichment",
+          companies: companies.length,
+          signals: signalResults.length,
+          leads: 0,
+          detail: `Enrichment error: ${String(err).slice(0, 100)}`,
+        });
+        continue;
+      }
 
       if (enrichedLeads.length === 0) {
         results.push({
@@ -121,12 +135,25 @@ export async function POST(request: Request) {
       }
 
       // Step 4: Deep research (top 10)
-      const topLeads = enrichedLeads.slice(0, 10);
-      const researchedLeads = await deepResearch(
-        topLeads,
-        template.description || template.name
-      );
-      console.log(`  ${researchedLeads.length} leads fully researched`);
+      let researchedLeads: Awaited<ReturnType<typeof deepResearch>> = [];
+      try {
+        const topLeads = enrichedLeads.slice(0, 10);
+        researchedLeads = await deepResearch(
+          topLeads,
+          template.description || template.name
+        );
+        console.log(`  ${researchedLeads.length} leads fully researched`);
+      } catch (err) {
+        console.error("  Deep research error:", err);
+        // Still save leads without deep research
+        researchedLeads = enrichedLeads.slice(0, 10).map((lead) => ({
+          ...lead,
+          justification: "Signal-matched lead (research pending)",
+          contact_summary: "",
+          approach_strategies: [],
+          email_templates: [],
+        }));
+      }
 
       // Step 5: Store as "discovered" leads
       const leadsToInsert = researchedLeads.map((lead) => ({
