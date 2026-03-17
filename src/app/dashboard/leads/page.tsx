@@ -1,12 +1,12 @@
 export const dynamic = "force-dynamic";
 
-import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ClientLeadsList } from "@/components/client/leads-list";
 
 export default async function ClientLeadsPage() {
   const user = await getUser();
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   // Get client's niches
   const { data: niches } = await supabase
@@ -17,12 +17,14 @@ export default async function ClientLeadsPage() {
   const nicheIds = niches?.map((n) => n.id) ?? [];
 
   // Get published + revealed leads
-  const { data: leads } = await supabase
-    .from("leads")
-    .select("*")
-    .in("client_niche_id", nicheIds.length ? nicheIds : ["none"])
-    .in("status", ["published", "revealed", "disputed", "refunded"])
-    .order("published_at", { ascending: false });
+  const { data: leads } = nicheIds.length
+    ? await supabase
+        .from("leads")
+        .select("*")
+        .in("client_niche_id", nicheIds)
+        .in("status", ["published", "revealed", "disputed", "refunded"])
+        .order("published_at", { ascending: false })
+    : { data: [] };
 
   // Get credit balance
   const { data: creditPacks } = await supabase

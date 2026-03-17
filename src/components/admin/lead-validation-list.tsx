@@ -42,11 +42,12 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
   const supabase = createClient();
 
   async function updateLeadStatus(id: string, status: "validated" | "published") {
-    const updateData: Record<string, string> = { status };
-    if (status === "validated") updateData.validated_at = new Date().toISOString();
-    if (status === "published") updateData.published_at = new Date().toISOString();
-    const { error } = await supabase.from("leads").update(updateData).eq("id", id);
-    if (!error) {
+    const res = await fetch("/api/admin/update-lead", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ leadId: id, status }),
+    });
+    if (res.ok) {
       setLeads(leads.map((l) => l.id === id ? { ...l, status } : l));
       if (selectedLead?.id === id) setSelectedLead({ ...selectedLead, status });
     }
