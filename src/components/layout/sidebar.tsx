@@ -47,15 +47,15 @@ export function Sidebar({ role, userName }: { role: UserRole; userName: string }
 
   return (
     <aside className="w-64 bg-card border-r border-border min-h-screen flex flex-col">
-      <div className="p-6 border-b border-border">
+      <div className="p-6 border-b border-border flex flex-col items-center">
         <Image
           src="/logo-reachly.png"
           alt="Reachly"
-          width={120}
-          height={42}
-          className="mb-2"
+          width={200}
+          height={70}
+          className="mb-3"
         />
-        <p className="text-xs text-muted">{userName}</p>
+        <p className="text-base font-bold text-foreground">{userName}</p>
       </div>
 
       <nav className="flex-1 p-4 space-y-1">
