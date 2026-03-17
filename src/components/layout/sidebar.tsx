@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
@@ -47,8 +48,14 @@ export function Sidebar({ role, userName }: { role: UserRole; userName: string }
   return (
     <aside className="w-64 bg-card border-r border-border min-h-screen flex flex-col">
       <div className="p-6 border-b border-border">
-        <h1 className="text-xl font-bold text-primary">Reachly</h1>
-        <p className="text-xs text-muted mt-1">{userName}</p>
+        <Image
+          src="/logo-reachly.png"
+          alt="Reachly"
+          width={120}
+          height={42}
+          className="mb-2"
+        />
+        <p className="text-xs text-muted">{userName}</p>
       </div>
 
       <nav className="flex-1 p-4 space-y-1">

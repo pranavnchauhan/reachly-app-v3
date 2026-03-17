@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -34,7 +35,14 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-foreground">Reachly</h1>
+          <Image
+            src="/logo-reachly.png"
+            alt="Reachly"
+            width={180}
+            height={64}
+            className="mx-auto mb-3"
+            priority
+          />
           <p className="text-muted mt-2">Sign in to your account</p>
         </div>
 

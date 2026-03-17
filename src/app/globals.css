@@ -1,19 +1,24 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --primary: #6366f1;
-  --primary-hover: #4f46e5;
-  --primary-light: #e0e7ff;
-  --secondary: #64748b;
-  --accent: #06b6d4;
+  /* Reachly Green Brand Theme */
+  --background: #f7fdf9;
+  --foreground: #1a1f2e;
+  --primary: #0d9f6e;
+  --primary-hover: #0b8a5e;
+  --primary-light: #d1fae5;
+  --secondary: #f0fdf4;
+  --accent: #059669;
   --success: #10b981;
   --warning: #f59e0b;
   --danger: #ef4444;
   --card: #ffffff;
-  --border: #e2e8f0;
-  --muted: #94a3b8;
+  --border: #d1e7dd;
+  --muted: #6b7280;
+  --hot: #ef4444;
+  --warm: #f97316;
+  --cold: #3b82f6;
+  --verified: #0d9f6e;
 }
 
 @theme inline {
@@ -30,19 +35,24 @@
   --color-card: var(--card);
   --color-border: var(--border);
   --color-muted: var(--muted);
+  --color-hot: var(--hot);
+  --color-warm: var(--warm);
+  --color-cold: var(--cold);
+  --color-verified: var(--verified);
   --font-sans: var(--font-inter);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0f172a;
-    --foreground: #f1f5f9;
-    --primary: #818cf8;
-    --primary-hover: #6366f1;
-    --primary-light: #1e1b4b;
-    --card: #1e293b;
-    --border: #334155;
-    --muted: #64748b;
+    --background: #0b1120;
+    --foreground: #f0fdf4;
+    --primary: #0d9f6e;
+    --primary-hover: #10b981;
+    --primary-light: #064e3b;
+    --secondary: #1e293b;
+    --card: #1a2332;
+    --border: #1e3a2f;
+    --muted: #9ca3af;
   }
 }
 
