@@ -1,21 +1,24 @@
 export const dynamic = "force-dynamic";
 
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Target, Users, Zap, AlertTriangle } from "lucide-react";
+import { PipelineTrigger } from "@/components/admin/pipeline-trigger";
 
 export default async function AdminDashboard() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const [
     { count: templateCount },
     { count: clientCount },
     { count: pendingLeads },
     { count: pendingDisputes },
+    { data: activeNiches },
   ] = await Promise.all([
     supabase.from("niche_templates").select("*", { count: "exact", head: true }),
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "client"),
     supabase.from("leads").select("*", { count: "exact", head: true }).eq("status", "discovered"),
     supabase.from("disputes").select("*", { count: "exact", head: true }).eq("status", "pending"),
+    supabase.from("client_niches").select("id, name").eq("is_active", true),
   ]);
 
   const stats = [
@@ -41,10 +44,7 @@ export default async function AdminDashboard() {
         ))}
       </div>
 
-      <div className="bg-card border border-border rounded-xl p-6">
-        <h2 className="text-lg font-semibold mb-4">Recent Activity</h2>
-        <p className="text-muted text-sm">Pipeline activity and lead validation history will appear here.</p>
-      </div>
+      <PipelineTrigger niches={activeNiches ?? []} />
     </div>
   );
 }
