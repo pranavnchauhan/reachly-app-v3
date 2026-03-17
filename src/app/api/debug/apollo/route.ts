@@ -6,114 +6,73 @@ export async function GET() {
 
   const tests = [];
 
-  // Test 1: Company search
-  try {
-    const res = await fetch("https://api.apollo.io/api/v1/mixed_companies/search", {
+  // Step 1: Find a person via api_search (free)
+  const searchRes = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
+    body: JSON.stringify({
+      q_organization_name: "NEXTDC",
+      person_seniorities: ["c_suite", "vp", "director"],
+      per_page: 3,
+    }),
+  });
+  const searchText = await searchRes.text();
+  let searchData;
+  try { searchData = JSON.parse(searchText); } catch { searchData = { error: searchText.slice(0, 200) }; }
+
+  const people = searchData.people || [];
+  tests.push({
+    test: "api_search",
+    status: searchRes.ok ? "ok" : `error_${searchRes.status}`,
+    count: people.length,
+    sample: people.slice(0, 2).map((p: Record<string, unknown>) => ({
+      id: p.id,
+      name: `${p.first_name} ${p.last_name}`,
+      title: p.title,
+      email: p.email || "MISSING",
+      phone: p.phone_number || "MISSING",
+      linkedin: p.linkedin_url || "MISSING",
+    })),
+  });
+
+  // Step 2: Enrich first person via /people/match (costs credits)
+  if (people.length > 0) {
+    const person = people[0] as Record<string, unknown>;
+
+    const matchRes = await fetch("https://api.apollo.io/api/v1/people/match", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
       body: JSON.stringify({
-        q_keywords: "construction builder",
-        organization_locations: ["Australia"],
-        organization_num_employees_ranges: ["10,500"],
-        per_page: 3,
+        id: person.id,
+        reveal_phone_number: true,
       }),
     });
-    const data = await res.json();
-    const orgs = data.organizations || [];
+    const matchText = await matchRes.text();
+    let matchData;
+    try { matchData = JSON.parse(matchText); } catch { matchData = { error: matchText.slice(0, 200) }; }
+
+    const enriched = matchData.person || {};
+    const phones = enriched.phone_numbers || [];
+
     tests.push({
-      test: "company_search",
-      status: res.ok ? "ok" : "error",
-      count: orgs.length,
-      sample: orgs.slice(0, 2).map((o: Record<string, unknown>) => ({
-        name: o.name,
-        domain: o.primary_domain,
-        id: o.id,
-        employees: o.estimated_num_employees,
-      })),
+      test: "people_match_enrichment",
+      status: matchRes.ok ? "ok" : `error_${matchRes.status}`,
+      person_id: person.id,
+      enriched: {
+        name: `${enriched.first_name || ""} ${enriched.last_name || ""}`.trim(),
+        title: enriched.title || "MISSING",
+        email: enriched.email || "MISSING",
+        phone_number: enriched.phone_number || "MISSING",
+        phone_numbers: phones.map((p: Record<string, string>) => p.sanitized_number || p.raw_number),
+        linkedin_url: enriched.linkedin_url || "MISSING",
+      },
+      org: enriched.organization ? {
+        name: (enriched.organization as Record<string, unknown>).name,
+        industry: (enriched.organization as Record<string, unknown>).industry,
+        employees: (enriched.organization as Record<string, unknown>).estimated_num_employees,
+      } : "MISSING",
+      raw_error: matchData.error || null,
     });
-
-    // Test 2: People search by company name
-    if (orgs.length > 0) {
-      const companyName = orgs[0].name as string;
-      const companyDomain = orgs[0].primary_domain as string;
-      const companyId = orgs[0].id as string;
-
-      // Strategy A: by domain
-      const resA = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
-        body: JSON.stringify({
-          q_organization_domains: companyDomain,
-          person_seniorities: ["owner", "founder", "c_suite", "vp", "director"],
-          per_page: 3,
-        }),
-      });
-      const dataA = await resA.json();
-      tests.push({
-        test: "people_by_domain",
-        company: companyName,
-        domain: companyDomain,
-        status: resA.ok ? "ok" : `error_${resA.status}`,
-        count: (dataA.people || []).length,
-        sample: (dataA.people || []).slice(0, 2).map((p: Record<string, unknown>) => ({
-          name: `${p.first_name} ${p.last_name}`,
-          title: p.title,
-          email: p.email || "none",
-        })),
-        raw_error: dataA.error || null,
-      });
-
-      // Strategy B: by org ID
-      const resB = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
-        body: JSON.stringify({
-          organization_ids: [companyId],
-          person_seniorities: ["owner", "founder", "c_suite", "vp", "director"],
-          per_page: 3,
-        }),
-      });
-      const dataB = await resB.json();
-      tests.push({
-        test: "people_by_org_id",
-        company: companyName,
-        org_id: companyId,
-        status: resB.ok ? "ok" : `error_${resB.status}`,
-        count: (dataB.people || []).length,
-        sample: (dataB.people || []).slice(0, 2).map((p: Record<string, unknown>) => ({
-          name: `${p.first_name} ${p.last_name}`,
-          title: p.title,
-          email: p.email || "none",
-        })),
-        raw_error: dataB.error || null,
-      });
-
-      // Strategy C: by company name
-      const resC = await fetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
-        body: JSON.stringify({
-          q_organization_name: companyName,
-          person_seniorities: ["owner", "founder", "c_suite", "vp", "director"],
-          per_page: 3,
-        }),
-      });
-      const dataC = await resC.json();
-      tests.push({
-        test: "people_by_name",
-        company: companyName,
-        status: resC.ok ? "ok" : `error_${resC.status}`,
-        count: (dataC.people || []).length,
-        sample: (dataC.people || []).slice(0, 2).map((p: Record<string, unknown>) => ({
-          name: `${p.first_name} ${p.last_name}`,
-          title: p.title,
-          email: p.email || "none",
-        })),
-        raw_error: dataC.error || null,
-      });
-    }
-  } catch (err) {
-    tests.push({ test: "error", message: String(err) });
   }
 
   return NextResponse.json({ tests });
