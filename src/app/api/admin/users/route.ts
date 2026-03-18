@@ -91,7 +91,7 @@ export async function POST(request: Request) {
         sharedUsers = [...new Set(
           (otherNiches || [])
             .filter((n) => n.client_id)
-            .map((n) => (n.profiles as { full_name: string })?.full_name || n.client_id)
+            .map((n) => (n.profiles as unknown as { full_name: string })?.full_name || n.client_id)
         )];
       }
 
