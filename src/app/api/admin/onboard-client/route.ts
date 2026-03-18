@@ -96,7 +96,7 @@ export async function POST(request: Request) {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
     await anonClient.auth.resetPasswordForEmail(email, {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth/login`,
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth/reset-password`,
     });
   }
 

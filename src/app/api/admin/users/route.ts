@@ -233,7 +233,7 @@ export async function POST(request: Request) {
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
       );
       const { error } = await anonClient.auth.resetPasswordForEmail(userData.user.email, {
-        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth/login`,
+        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth/reset-password`,
       });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ success: true, email: userData.user.email });
