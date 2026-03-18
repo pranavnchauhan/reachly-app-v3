@@ -1,65 +1,52 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Image from "next/image";
 
 export default function AuthPage() {
-  const [mode, setMode] = useState<"loading" | "reset" | "redirect">("loading");
+  // If URL has a hash, it's a recovery/auth flow — show reset form immediately, don't redirect
+  const hasHash = typeof window !== "undefined" && window.location.hash.length > 1;
+
+  const [mode, setMode] = useState<"loading" | "reset" | "login">(hasHash ? "reset" : "loading");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+  const recoveryDetected = useRef(hasHash);
   const router = useRouter();
   const supabase = createClient();
 
   useEffect(() => {
-    // Listen for auth state changes — this fires when Supabase processes recovery tokens from the URL hash
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY") {
+        recoveryDetected.current = true;
         setMode("reset");
-      } else if (event === "SIGNED_IN" && mode === "loading") {
-        // If signed in but not in recovery mode, check if this is a recovery session
-        // by looking at the URL hash (may already be consumed)
-        setMode("reset");
+      } else if (event === "SIGNED_IN" && !recoveryDetected.current) {
+        // Signed in but NOT recovery — go to dashboard
+        router.replace("/dashboard");
       }
     });
 
-    // Check URL hash for recovery tokens
-    const hash = window.location.hash;
-    if (hash.includes("type=recovery")) {
-      setMode("reset");
-    }
-
-    // Check for PKCE code parameter
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get("code");
-    if (code) {
-      router.replace(`/auth/callback?code=${code}&type=recovery`);
-      return;
-    }
-
-    // Fallback: check if user already has a session (e.g. token was auto-exchanged)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session && mode === "loading") {
-        // User has a session — likely recovery token was already exchanged
-        setMode("reset");
-      } else if (!session) {
-        // No session, no tokens — wait a bit then redirect to login
-        setTimeout(() => {
-          setMode((current) => current === "loading" ? "redirect" : current);
-        }, 3000);
+    // Only redirect to login if there's genuinely no recovery flow
+    // Wait 5 seconds to give Supabase time to process tokens
+    const timeout = setTimeout(() => {
+      if (!recoveryDetected.current) {
+        setMode("login");
       }
-    });
+    }, 5000);
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (mode === "redirect") {
+    if (mode === "login") {
       router.replace("/auth/login");
     }
   }, [mode, router]);
@@ -90,8 +77,7 @@ export default function AuthPage() {
     setTimeout(() => router.push("/dashboard"), 2000);
   }
 
-  // Loading state
-  if (mode === "loading" || mode === "redirect") {
+  if (mode === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <p className="text-muted">Verifying...</p>
@@ -99,7 +85,6 @@ export default function AuthPage() {
     );
   }
 
-  // Success state
   if (success) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background px-4">
@@ -119,7 +104,7 @@ export default function AuthPage() {
     );
   }
 
-  // Reset password form
+  // Reset password form (mode === "reset")
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-md">
@@ -136,12 +121,9 @@ export default function AuthPage() {
           <div>
             <label htmlFor="password" className="block text-sm font-medium mb-1.5">New Password</label>
             <input
-              id="password"
-              type="password"
-              value={password}
+              id="password" type="password" value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={8}
+              required minLength={8}
               className="w-full px-3 py-2.5 rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               placeholder="Minimum 8 characters"
             />
@@ -150,9 +132,7 @@ export default function AuthPage() {
           <div>
             <label htmlFor="confirmPassword" className="block text-sm font-medium mb-1.5">Confirm Password</label>
             <input
-              id="confirmPassword"
-              type="password"
-              value={confirmPassword}
+              id="confirmPassword" type="password" value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
               className="w-full px-3 py-2.5 rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -160,11 +140,8 @@ export default function AuthPage() {
             />
           </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 bg-primary text-white rounded-lg font-medium hover:bg-primary-hover transition-colors disabled:opacity-50"
-          >
+          <button type="submit" disabled={loading}
+            className="w-full py-2.5 bg-primary text-white rounded-lg font-medium hover:bg-primary-hover transition-colors disabled:opacity-50">
             {loading ? "Updating..." : "Set Password"}
           </button>
         </form>
