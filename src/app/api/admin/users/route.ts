@@ -18,7 +18,7 @@ export async function GET() {
     confirmed: !!u.email_confirmed_at,
   }));
 
-  const { data: profiles } = await supabase.from("profiles").select("id, role, full_name, company_name");
+  const { data: profiles } = await supabase.from("profiles").select("id, role, full_name, company_name, account_status, archived_at, archive_expires_at");
   const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
 
   const enriched = users.map((u) => ({
@@ -26,6 +26,9 @@ export async function GET() {
     role: profileMap.get(u.id)?.role || "client",
     full_name: profileMap.get(u.id)?.full_name || u.full_name,
     company_name: profileMap.get(u.id)?.company_name || u.company_name,
+    account_status: profileMap.get(u.id)?.account_status || "active",
+    archived_at: profileMap.get(u.id)?.archived_at || null,
+    archive_expires_at: profileMap.get(u.id)?.archive_expires_at || null,
   }));
 
   return NextResponse.json({ users: enriched });
