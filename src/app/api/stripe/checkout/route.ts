@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { stripe, CREDIT_PACKS } from "@/lib/stripe";
+import { getStripe, CREDIT_PACKS } from "@/lib/stripe";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au";
 
-  const session = await stripe.checkout.sessions.create({
+  const session = await getStripe().checkout.sessions.create({
     mode: "payment",
     currency: "aud",
     customer_email: user.email,
