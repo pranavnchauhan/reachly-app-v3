@@ -9,8 +9,8 @@ export default async function DashboardLayout({
 }) {
   const user = await getUser();
 
-  // Redirect admins to admin panel
-  if (user.role === "admin") {
+  // Redirect admins and staff to admin panel
+  if (user.role === "admin" || user.role === "staff") {
     redirect("/admin");
   }
 

@@ -26,6 +26,12 @@ const adminLinks = [
   { href: "/admin/users", label: "Users", icon: Settings },
 ];
 
+const staffLinks = [
+  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/leads", label: "Lead Validation", icon: FileCheck },
+  { href: "/admin/clients", label: "Clients", icon: Users },
+];
+
 const clientLinks = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/leads", label: "My Leads", icon: Zap },
@@ -34,10 +40,16 @@ const clientLinks = [
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 
+const linksByRole: Record<string, typeof adminLinks> = {
+  admin: adminLinks,
+  staff: staffLinks,
+  client: clientLinks,
+};
+
 export function Sidebar({ role, userName }: { role: UserRole; userName: string }) {
   const pathname = usePathname();
   const router = useRouter();
-  const links = role === "admin" ? adminLinks : clientLinks;
+  const links = linksByRole[role] || clientLinks;
 
   async function handleLogout() {
     const supabase = createClient();

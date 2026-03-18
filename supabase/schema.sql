@@ -5,7 +5,7 @@
 create extension if not exists "uuid-ossp";
 
 -- Enums
-create type user_role as enum ('admin', 'client');
+create type user_role as enum ('admin', 'staff', 'client');
 create type lead_status as enum ('discovered', 'validated', 'published', 'revealed', 'disputed', 'refunded');
 create type signal_request_status as enum ('pending', 'approved', 'rejected');
 create type credit_transaction_type as enum ('purchase', 'debit', 'refund');

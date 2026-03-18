@@ -152,6 +152,7 @@ export default function UsersPage() {
                       <select value={editData.role || "client"} onChange={(e) => setEditData({ ...editData, role: e.target.value })}
                         className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary">
                         <option value="client">Client</option>
+                        <option value="staff">Staff</option>
                         <option value="admin">Admin</option>
                       </select>
                     </div>
