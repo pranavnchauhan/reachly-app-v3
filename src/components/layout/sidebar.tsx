@@ -14,6 +14,7 @@ import {
   Settings,
   LogOut,
   Zap,
+  ShoppingCart,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -38,6 +39,7 @@ const clientLinks = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/leads", label: "My Leads", icon: Zap },
   { href: "/dashboard/credits", label: "Credits", icon: CreditCard },
+  { href: "/dashboard/buy-credits", label: "Buy Credits", icon: ShoppingCart },
   { href: "/dashboard/disputes", label: "Disputes", icon: AlertTriangle },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];

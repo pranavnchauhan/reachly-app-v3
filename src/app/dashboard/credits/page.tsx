@@ -4,7 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth";
 import { CreditCard, ArrowDownCircle, ArrowUpCircle, RotateCcw } from "lucide-react";
 
-export default async function CreditsPage() {
+export default async function CreditsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ purchased?: string }>;
+}) {
+  const { purchased } = await searchParams;
   const user = await getUser();
   const supabase = await createClient();
 
@@ -41,6 +46,15 @@ export default async function CreditsPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-6">Credits</h1>
+
+      {purchased && (
+        <div className="bg-success/10 border border-success/20 text-success rounded-xl p-4 mb-6 flex items-center gap-3">
+          <ArrowDownCircle className="w-5 h-5 flex-shrink-0" />
+          <p className="text-sm font-medium">
+            {purchased} credits purchased successfully! They&apos;re ready to use.
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <div className="bg-card border border-border rounded-xl p-5">

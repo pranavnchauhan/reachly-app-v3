@@ -102,17 +102,20 @@ create table leads (
 -- Credit Packs
 create table credit_packs (
   id uuid primary key default uuid_generate_v4(),
-  client_id uuid references profiles(id) not null,
+  company_id uuid references companies(id),
+  client_id uuid references profiles(id),
   total_credits int not null,
   used_credits int not null default 0,
   purchased_at timestamptz not null default now(),
-  expires_at timestamptz
+  expires_at timestamptz,
+  stripe_session_id text
 );
 
 -- Credit Transactions
 create table credit_transactions (
   id uuid primary key default uuid_generate_v4(),
-  client_id uuid references profiles(id) not null,
+  company_id uuid references companies(id),
+  client_id uuid references profiles(id),
   credit_pack_id uuid references credit_packs(id) not null,
   type credit_transaction_type not null,
   amount int not null,
