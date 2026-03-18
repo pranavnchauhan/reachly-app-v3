@@ -23,6 +23,7 @@ const adminLinks = [
   { href: "/admin/niches", label: "Niche Templates", icon: Target },
   { href: "/admin/leads", label: "Lead Validation", icon: FileCheck },
   { href: "/admin/clients", label: "Clients", icon: Users },
+  { href: "/admin/users", label: "Users", icon: Settings },
 ];
 
 const clientLinks = [
