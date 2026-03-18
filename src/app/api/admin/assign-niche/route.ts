@@ -2,14 +2,15 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: Request) {
-  const { clientId, templateId, name, geography, enabledSignals } = await request.json();
+  const { clientId, companyId, templateId, name, geography, enabledSignals } = await request.json();
 
   const supabase = createAdminClient();
 
   const { data, error } = await supabase
     .from("client_niches")
     .insert({
-      client_id: clientId,
+      client_id: clientId || null,
+      company_id: companyId || null,
       template_id: templateId,
       name,
       geography: geography || [],

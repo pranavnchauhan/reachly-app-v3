@@ -27,8 +27,10 @@ export function AssignNiche({
   clientId,
   templates,
   existingNiches,
+  companyId,
 }: {
   clientId: string;
+  companyId?: string;
   templates: Template[];
   existingNiches: ClientNiche[];
 }) {
@@ -57,7 +59,8 @@ export function AssignNiche({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        clientId,
+        clientId: clientId || null,
+        companyId: companyId || null,
         templateId: selectedTemplate,
         name: nicheName || template.name,
         geography: geography.split(",").map((g) => g.trim()).filter(Boolean),

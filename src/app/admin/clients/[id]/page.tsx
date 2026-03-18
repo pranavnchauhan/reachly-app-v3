@@ -3,9 +3,13 @@ export const dynamic = "force-dynamic";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, CreditCard } from "lucide-react";
+import {
+  ArrowLeft, Building2, Users, Target, CreditCard, Mail, Phone, MapPin, Globe,
+  Plus,
+} from "lucide-react";
 import { AssignNiche } from "@/components/admin/assign-niche";
 import { AddCredits } from "@/components/admin/add-credits";
+import { ClientActions } from "@/components/admin/client-actions";
 
 export default async function ClientDetailPage({
   params,
@@ -15,20 +19,46 @@ export default async function ClientDetailPage({
   const { id } = await params;
   const supabase = createAdminClient();
 
-  const { data: client } = await supabase
-    .from("profiles")
+  // Try companies table first (new model)
+  const { data: company } = await supabase
+    .from("companies")
     .select("*")
     .eq("id", id)
     .single();
 
-  if (!client) notFound();
+  if (!company) {
+    // Fallback: try profiles (old model)
+    const { data: profile } = await supabase.from("profiles").select("*").eq("id", id).single();
+    if (!profile) notFound();
+    // Redirect to user detail page for old-model clients
+    notFound();
+  }
 
-  // Get client's niches
-  const { data: clientNiches } = await supabase
+  // Get users in this company
+  const { data: companyUsers } = await supabase
+    .from("profiles")
+    .select("id, full_name, email, role, account_status, created_at")
+    .eq("company_id", id)
+    .order("created_at");
+
+  // Get niches for this company
+  const { data: companyNiches } = await supabase
     .from("client_niches")
     .select("*, niche_templates(name)")
-    .eq("client_id", id)
+    .eq("company_id", id)
     .order("created_at", { ascending: false });
+
+  // Also get niches assigned to users in this company (backward compat)
+  const userIds = (companyUsers || []).map((u) => u.id);
+  const { data: userNiches } = userIds.length
+    ? await supabase
+        .from("client_niches")
+        .select("*, niche_templates(name)")
+        .in("client_id", userIds)
+        .is("company_id", null)
+    : { data: [] };
+
+  const allNiches = [...(companyNiches || []), ...(userNiches || [])];
 
   // Get available templates
   const { data: templates } = await supabase
@@ -36,92 +66,135 @@ export default async function ClientDetailPage({
     .select("id, name, signals, industries")
     .eq("is_active", true);
 
-  // Get credit packs
-  const { data: creditPacks } = await supabase
-    .from("credit_packs")
-    .select("*")
-    .eq("client_id", id)
-    .order("purchased_at", { ascending: false });
-
-  const totalCredits = creditPacks?.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0) ?? 0;
-
   // Get lead counts
-  const nicheIds = clientNiches?.map((n) => n.id) ?? [];
+  const nicheIds = allNiches.map((n) => n.id);
   const { count: totalLeads } = nicheIds.length
-    ? await supabase
-        .from("leads")
-        .select("*", { count: "exact", head: true })
-        .in("client_niche_id", nicheIds)
+    ? await supabase.from("leads").select("*", { count: "exact", head: true }).in("client_niche_id", nicheIds)
     : { count: 0 };
+
+  // Get credit balance across all users
+  const { data: creditPacks } = userIds.length
+    ? await supabase.from("credit_packs").select("total_credits, used_credits, client_id").in("client_id", userIds)
+    : { data: [] };
+  const totalCredits = creditPacks?.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0) ?? 0;
 
   return (
     <div className="max-w-4xl">
       <Link href="/admin/clients" className="flex items-center gap-2 text-sm text-muted hover:text-foreground mb-4">
-        <ArrowLeft className="w-4 h-4" />
-        Back to Clients
+        <ArrowLeft className="w-4 h-4" /> Back to Clients
       </Link>
 
-      {/* Client Info */}
-      <div className="bg-card border border-border rounded-xl p-6 mb-6">
+      {/* Company Header */}
+      <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-6 mb-6 shadow-sm">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold">{client.full_name}</h1>
-            <p className="text-muted mt-1">{client.company_name || "No company"}</p>
-            <p className="text-sm text-muted mt-1">{client.email}</p>
+            <h1 className="text-2xl font-bold">{company.company_name}</h1>
+            {company.business_names?.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {company.business_names.map((bn: string, i: number) => (
+                  <span key={i} className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">t/a {bn}</span>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="text-right">
-            <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">{client.role}</span>
-            <p className="text-xs text-muted mt-2">
-              Joined {new Date(client.created_at).toLocaleDateString()}
-            </p>
-          </div>
+          <ClientActions companyId={id} companyName={company.company_name} />
         </div>
 
-        <div className="grid grid-cols-3 gap-4 mt-6 pt-4 border-t border-border">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5 pt-4 border-t border-border/30">
+          <div className="flex items-center gap-2 text-sm text-muted">
+            {company.abn && <><Globe className="w-3.5 h-3.5" /> ABN: <span className="font-mono">{company.abn}</span></>}
+          </div>
+          {company.industry && <p className="text-sm text-muted flex items-center gap-2"><Building2 className="w-3.5 h-3.5" /> {company.industry}</p>}
+          {company.email && <p className="text-sm text-muted flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> {company.email}</p>}
+          {company.phone && <p className="text-sm text-muted flex items-center gap-2"><Phone className="w-3.5 h-3.5" /> {company.phone}</p>}
+          {(company.city || company.state) && <p className="text-sm text-muted flex items-center gap-2"><MapPin className="w-3.5 h-3.5" /> {[company.address, company.city, company.state, company.postcode].filter(Boolean).join(", ")}</p>}
+        </div>
+
+        <div className="grid grid-cols-3 gap-4 mt-5 pt-4 border-t border-border/30">
           <div>
-            <p className="text-sm text-muted">Active Niches</p>
-            <p className="text-2xl font-bold">{clientNiches?.filter((n) => n.is_active).length ?? 0}</p>
+            <p className="text-sm text-muted">Users</p>
+            <p className="text-2xl font-bold">{companyUsers?.length ?? 0}</p>
           </div>
           <div>
             <p className="text-sm text-muted">Total Leads</p>
             <p className="text-2xl font-bold">{totalLeads ?? 0}</p>
           </div>
           <div>
-            <p className="text-sm text-muted">Credits Available</p>
+            <p className="text-sm text-muted">Credits</p>
             <p className="text-2xl font-bold">{totalCredits}</p>
           </div>
         </div>
+
+        {company.notes && (
+          <div className="mt-4 pt-4 border-t border-border/30">
+            <p className="text-xs text-muted uppercase tracking-wide mb-1">Notes</p>
+            <p className="text-sm text-muted">{company.notes}</p>
+          </div>
+        )}
       </div>
 
-      {/* Credits */}
-      <div className="bg-card border border-border rounded-xl p-6 mb-6">
+      {/* Users */}
+      <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-6 mb-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-primary" />
-            <h2 className="font-semibold">Credits</h2>
+            <Users className="w-5 h-5 text-primary" />
+            <h2 className="font-semibold">Users ({companyUsers?.length ?? 0})</h2>
           </div>
+          <Link href={`/admin/users/new?company=${id}`}
+            className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white rounded-lg text-xs font-medium hover:bg-primary-hover transition-colors">
+            <Plus className="w-3 h-3" /> Add User
+          </Link>
         </div>
-        <AddCredits clientId={id} currentBalance={totalCredits} />
-        {creditPacks && creditPacks.length > 0 && (
-          <div className="mt-4 space-y-2">
-            {creditPacks.map((pack) => (
-              <div key={pack.id} className="flex items-center justify-between p-3 bg-background rounded-lg text-sm">
-                <span>{pack.total_credits} credits — purchased {new Date(pack.purchased_at).toLocaleDateString()}</span>
-                <span className="text-muted">{pack.total_credits - pack.used_credits} remaining</span>
-              </div>
+        {!companyUsers?.length ? (
+          <p className="text-sm text-muted">No users yet. Create a user for this client.</p>
+        ) : (
+          <div className="space-y-2">
+            {companyUsers.map((user) => (
+              <Link key={user.id} href={`/admin/users`}
+                className="flex items-center justify-between p-3 bg-background/50 border border-border/30 rounded-lg hover:border-primary/30 transition-colors block">
+                <div>
+                  <p className="text-sm font-medium">{user.full_name}</p>
+                  <p className="text-xs text-muted">{user.email}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                    user.account_status === "active" ? "bg-success/10 text-success" :
+                    user.account_status === "paused" ? "bg-warning/10 text-warning" :
+                    "bg-danger/10 text-danger"
+                  }`}>{user.account_status}</span>
+                  <span className="text-[10px] bg-muted/10 text-muted px-1.5 py-0.5 rounded-full">{user.role}</span>
+                </div>
+              </Link>
             ))}
           </div>
         )}
       </div>
 
-      {/* Niche Assignment */}
-      <div className="bg-card border border-border rounded-xl p-6 mb-6">
-        <h2 className="font-semibold mb-4">Assigned Niches</h2>
+      {/* Niches */}
+      <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-6 mb-6 shadow-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <Target className="w-5 h-5 text-primary" />
+          <h2 className="font-semibold">Niches ({allNiches.length})</h2>
+        </div>
         <AssignNiche
-          clientId={id}
+          clientId={userIds[0] || ""}
+          companyId={id}
           templates={templates ?? []}
-          existingNiches={clientNiches ?? []}
+          existingNiches={allNiches}
         />
+      </div>
+
+      {/* Credits */}
+      <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-6 shadow-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <CreditCard className="w-5 h-5 text-primary" />
+          <h2 className="font-semibold">Credits</h2>
+        </div>
+        {userIds[0] ? (
+          <AddCredits clientId={userIds[0]} currentBalance={totalCredits} />
+        ) : (
+          <p className="text-sm text-muted">Add a user first to manage credits.</p>
+        )}
       </div>
     </div>
   );
