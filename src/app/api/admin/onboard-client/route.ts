@@ -4,7 +4,7 @@ import type { Signal } from "@/types/database";
 
 export async function POST(request: Request) {
   const {
-    fullName, email, companyName, phone,
+    fullName, email, companyId, companyName, phone, position, role,
     templateId, nicheName, geography,
     initialCredits, sendWelcome,
   } = await request.json();
@@ -22,7 +22,11 @@ export async function POST(request: Request) {
     password: tempPassword,
     email_confirm: true,
     phone: phone || undefined,
-    user_metadata: { full_name: fullName, company_name: companyName },
+    user_metadata: {
+      full_name: fullName,
+      company_name: companyName,
+      position: position || null,
+    },
   });
 
   if (authError) {
@@ -31,19 +35,19 @@ export async function POST(request: Request) {
 
   const userId = authData.user.id;
 
-  // 2. Create profile
+  // 2. Create profile with company link
   await supabase.from("profiles").upsert({
     id: userId,
     email,
     full_name: fullName,
     company_name: companyName || null,
-    role: "client",
+    company_id: companyId || null,
+    role: role || "client",
     account_status: "active",
   });
 
-  // 3. Assign niche (if template selected)
+  // 3. Assign niche (if template selected) — link to both user and company
   if (templateId) {
-    // Get template signals for enabling all
     const { data: template } = await supabase
       .from("niche_templates")
       .select("signals")
@@ -54,6 +58,7 @@ export async function POST(request: Request) {
 
     await supabase.from("client_niches").insert({
       client_id: userId,
+      company_id: companyId || null,
       template_id: templateId,
       name: nicheName || "Default",
       geography: geography || [],

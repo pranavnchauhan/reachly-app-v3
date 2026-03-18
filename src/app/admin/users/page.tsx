@@ -239,7 +239,7 @@ export default function UsersPage() {
             {users.length} total · {users.filter(u => u.account_status === "active").length} active · {users.filter(u => u.account_status === "paused").length} paused · {users.filter(u => u.account_status === "archived").length} archived
           </p>
         </div>
-        <Link href="/admin/clients/new"
+        <Link href="/admin/users/new"
           className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors">
           <Users className="w-4 h-4" /> New User
         </Link>
