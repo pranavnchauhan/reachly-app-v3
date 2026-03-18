@@ -72,11 +72,45 @@ export default async function ClientDetailPage({
     ? await supabase.from("leads").select("*", { count: "exact", head: true }).in("client_niche_id", nicheIds)
     : { count: 0 };
 
-  // Get credit balance across all users
-  const { data: creditPacks } = userIds.length
-    ? await supabase.from("credit_packs").select("total_credits, used_credits, client_id").in("client_id", userIds)
+  // Get credit packs — company-level + user-level
+  const { data: companyPacks } = await supabase
+    .from("credit_packs")
+    .select("id, total_credits, used_credits, purchased_at")
+    .eq("company_id", id)
+    .order("purchased_at", { ascending: false });
+
+  const { data: userPacks } = userIds.length
+    ? await supabase
+        .from("credit_packs")
+        .select("id, total_credits, used_credits, purchased_at")
+        .in("client_id", userIds)
+        .is("company_id", null)
     : { data: [] };
-  const totalCredits = creditPacks?.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0) ?? 0;
+
+  const allPacks = [...(companyPacks || []), ...(userPacks || [])];
+  const totalCredits = allPacks.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0);
+
+  // Get recent transactions
+  const { data: companyTx } = await supabase
+    .from("credit_transactions")
+    .select("id, type, amount, description, created_at")
+    .eq("company_id", id)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  const { data: userTx } = userIds.length
+    ? await supabase
+        .from("credit_transactions")
+        .select("id, type, amount, description, created_at")
+        .in("client_id", userIds)
+        .is("company_id", null)
+        .order("created_at", { ascending: false })
+        .limit(20)
+    : { data: [] };
+
+  const allTransactions = [...(companyTx || []), ...(userTx || [])]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 20);
 
   return (
     <div className="max-w-4xl">
@@ -190,11 +224,12 @@ export default async function ClientDetailPage({
           <CreditCard className="w-5 h-5 text-primary" />
           <h2 className="font-semibold">Credits</h2>
         </div>
-        {userIds[0] ? (
-          <AddCredits clientId={userIds[0]} currentBalance={totalCredits} />
-        ) : (
-          <p className="text-sm text-muted">Add a user first to manage credits.</p>
-        )}
+        <AddCredits
+          companyId={id}
+          currentBalance={totalCredits}
+          packs={allPacks}
+          transactions={allTransactions}
+        />
       </div>
     </div>
   );

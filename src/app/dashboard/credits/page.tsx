@@ -8,10 +8,32 @@ export default async function CreditsPage() {
   const user = await getUser();
   const supabase = await createClient();
 
-  const [{ data: packs }, { data: transactions }] = await Promise.all([
-    supabase.from("credit_packs").select("*").eq("client_id", user.id).order("purchased_at", { ascending: false }),
-    supabase.from("credit_transactions").select("*").eq("client_id", user.id).order("created_at", { ascending: false }).limit(50),
+  // Get user's company for company-level credits
+  const { data: profile } = await supabase.from("profiles").select("company_id").eq("id", user.id).single();
+  const companyId = profile?.company_id;
+
+  // Fetch user-level packs/transactions
+  const [{ data: userPacks }, { data: userTx }] = await Promise.all([
+    supabase.from("credit_packs").select("*").eq("client_id", user.id).is("company_id", null).order("purchased_at", { ascending: false }),
+    supabase.from("credit_transactions").select("*").eq("client_id", user.id).is("company_id", null).order("created_at", { ascending: false }).limit(50),
   ]);
+
+  // Fetch company-level packs/transactions if user belongs to a company
+  let companyPacks: typeof userPacks = [];
+  let companyTx: typeof userTx = [];
+  if (companyId) {
+    const [p, t] = await Promise.all([
+      supabase.from("credit_packs").select("*").eq("company_id", companyId).order("purchased_at", { ascending: false }),
+      supabase.from("credit_transactions").select("*").eq("company_id", companyId).order("created_at", { ascending: false }).limit(50),
+    ]);
+    companyPacks = p.data || [];
+    companyTx = t.data || [];
+  }
+
+  const packs = [...(companyPacks || []), ...(userPacks || [])];
+  const transactions = [...(companyTx || []), ...(userTx || [])]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 50);
 
   const totalCredits = packs?.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0) ?? 0;
   const totalUsed = packs?.reduce((sum, p) => sum + p.used_credits, 0) ?? 0;
