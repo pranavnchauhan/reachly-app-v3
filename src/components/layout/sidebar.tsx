@@ -8,6 +8,7 @@ import {
   Users,
   Target,
   FileCheck,
+  Archive,
   CreditCard,
   AlertTriangle,
   Settings,
@@ -24,6 +25,7 @@ const adminLinks = [
   { href: "/admin/leads", label: "Lead Validation", icon: FileCheck },
   { href: "/admin/clients", label: "Clients", icon: Users },
   { href: "/admin/users", label: "Users", icon: Settings },
+  { href: "/admin/orphaned", label: "Orphaned Data", icon: Archive },
 ];
 
 const staffLinks = [
