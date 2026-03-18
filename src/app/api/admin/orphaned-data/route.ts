@@ -49,7 +49,7 @@ export async function GET() {
   const enrichedNiches = (orphanedNiches || []).map((n) => ({
     ...n,
     lead_count: leadCounts[n.id] || 0,
-    template_name: (n.niche_templates as { name: string } | null)?.name || "Unknown",
+    template_name: (n.niche_templates as unknown as { name: string } | null)?.name || "Unknown",
     days_until_purge: n.archive_expires_at
       ? Math.max(0, Math.ceil((new Date(n.archive_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
       : null,
