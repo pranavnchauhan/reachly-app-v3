@@ -41,18 +41,84 @@ export default function UsersPage() {
 
   useEffect(() => { loadUsers(); }, []);
 
+  // Get current user's role from the users list (admin who is logged in)
+  const currentUserRole = users.find((u) => u.role === "admin" || u.role === "staff")?.role || "admin";
+
+  async function handleDelete(user: UserData) {
+    setMessage(null);
+
+    // Staff cannot delete
+    if (currentUserRole === "staff") {
+      setMessage({ type: "error", text: "You are not authorised to delete users. Please check with an admin." });
+      return;
+    }
+
+    // Pre-flight check
+    const checkRes = await fetch("/api/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "check_delete", userId: user.id }),
+    });
+    const impact = await checkRes.json();
+
+    let confirmed = false;
+
+    if (impact.impact === "clean") {
+      // No data — simple confirmation
+      confirmed = confirm(`Delete ${user.full_name || user.email}? This user has no niches or leads.`);
+    } else if (impact.impact === "safe") {
+      // Shared niche — safe to delete
+      confirmed = confirm(
+        `Delete ${user.full_name || user.email}?\n\n` +
+        `This user has ${impact.nicheCount} niche(s) and ${impact.leadCount} lead(s), ` +
+        `but other users share the same niche template (${impact.sharedUsers.join(", ")}).\n\n` +
+        `Deleting this user will NOT affect the client's operations — ` +
+        `niches and leads will be preserved.\n\n` +
+        `${impact.creditBalance > 0 ? `⚠️ This user has ${impact.creditBalance} unused credits.\n\n` : ""}` +
+        `Do you want to proceed?`
+      );
+    } else {
+      // Destructive — sole user
+      confirmed = confirm(
+        `⚠️ WARNING: Delete ${user.full_name || user.email}?\n\n` +
+        `This is the ONLY user attached to:\n` +
+        `• ${impact.nicheCount} niche(s)\n` +
+        `• ${impact.leadCount} lead(s)\n` +
+        `${impact.creditBalance > 0 ? `• ${impact.creditBalance} unused credits\n` : ""}` +
+        `\nDeleting this user will deactivate their niches and orphan all associated data. ` +
+        `Leads will be preserved but no longer accessible to any client.\n\n` +
+        `Are you sure you want to proceed?`
+      );
+    }
+
+    if (!confirmed) return;
+
+    // Execute deletion
+    const res = await fetch("/api/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", userId: user.id, callerRole: currentUserRole }),
+    });
+    const result = await res.json();
+    if (res.ok) {
+      setUsers(users.filter((u) => u.id !== user.id));
+      setMessage({ type: "success", text: `${user.full_name || user.email} deleted` });
+    } else {
+      setMessage({ type: "error", text: result.error || "Failed to delete user" });
+    }
+  }
+
   async function handleAction(action: string, userId: string, data?: Record<string, unknown>) {
     setMessage(null);
     const res = await fetch("/api/admin/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, userId, data }),
+      body: JSON.stringify({ action, userId, data, callerRole: currentUserRole }),
     });
     const result = await res.json();
     if (res.ok) {
       if (action === "delete") {
-        setUsers(users.filter((u) => u.id !== userId));
-        setMessage({ type: "success", text: "User deleted" });
+        // Handled by handleDelete above — shouldn't reach here
       } else if (action === "reset_password") {
         setMessage({ type: "success", text: `Password reset email sent to ${result.email}` });
       } else if (action === "confirm_email") {
@@ -261,10 +327,7 @@ export default function UsersPage() {
                     </button>
                   )}
                   {user.role !== "admin" && (
-                    <button onClick={() => {
-                      if (confirm(`Delete ${user.full_name || user.email}? This cannot be undone.`))
-                        handleAction("delete", user.id);
-                    }}
+                    <button onClick={() => handleDelete(user)}
                       className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-danger/5 border border-danger/20 text-danger hover:bg-danger/10 transition-colors">
                       <Trash2 className="w-3 h-3" /> Delete
                     </button>
