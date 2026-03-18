@@ -77,6 +77,19 @@ export default async function ClientDashboard() {
         </div>
       )}
 
+      {totalCredits === 0 && (
+        <div className="bg-warning/5 backdrop-blur-sm border border-warning/20 rounded-xl p-6">
+          <h2 className="text-lg font-semibold mb-2">No credits remaining</h2>
+          <p className="text-sm text-muted mb-4">
+            You need credits to reveal lead contact details. Purchase a credit pack to get started.
+          </p>
+          <Link href="/dashboard/credits"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors">
+            <CreditCard className="w-4 h-4" /> Buy Credits
+          </Link>
+        </div>
+      )}
+
       {(availableLeads ?? 0) === 0 && (revealedLeads ?? 0) === 0 && (
         <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-8 text-center">
           <Zap className="w-10 h-10 text-muted mx-auto mb-3" />
