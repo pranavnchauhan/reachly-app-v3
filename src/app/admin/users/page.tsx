@@ -43,7 +43,7 @@ export default function UsersPage() {
     onConfirm: () => void;
   } | null>(null);
 
-  const currentUserRole = "admin"; // TODO: get from auth context
+  const currentUserRole: string = "admin"; // TODO: get from auth context
 
   async function loadUsers() {
     setLoading(true);
