@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { safeFetchJson } from "@/lib/pipeline/safe-fetch";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -14,46 +13,43 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "ABR API key not configured" }, { status: 500 });
   }
 
-  // ABR API returns XML by default, use JSON endpoint
-  const { ok, data } = await safeFetchJson(
-    `https://abr.business.gov.au/json/AbnDetails.aspx?abn=${abn}&callback=&guid=${apiKey}`,
-    { method: "GET" }
-  );
+  try {
+    // ABR returns JSONP — need to strip the callback wrapper
+    const response = await fetch(
+      `https://abr.business.gov.au/json/AbnDetails.aspx?abn=${abn}&callback=cb&guid=${apiKey}`
+    );
+    const text = await response.text();
 
-  if (!ok) {
+    // Strip JSONP wrapper: cb({...}) → {...}
+    const jsonStr = text.replace(/^cb\(/, "").replace(/\)$/, "");
+    const data = JSON.parse(jsonStr);
+
+    if (data.Message && data.Message !== "") {
+      return NextResponse.json({ error: data.Message }, { status: 404 });
+    }
+
+    // Extract business names
+    const businessNames: string[] = [];
+    if (Array.isArray(data.BusinessName)) {
+      data.BusinessName.forEach((bn: Record<string, string>) => {
+        if (bn.Value) businessNames.push(bn.Value);
+      });
+    }
+
+    return NextResponse.json({
+      abn: data.Abn,
+      company_name: data.EntityName || "",
+      entity_type: data.EntityTypeName || "",
+      acn: data.Acn || "",
+      business_names: businessNames,
+      state: data.AddressState || "",
+      postcode: data.AddressPostcode || "",
+      is_active: data.AbnStatus === "Active",
+      abn_status: data.AbnStatus,
+      gst_registered: !!data.Gst,
+    });
+  } catch (err) {
+    console.error("ABR lookup error:", err);
     return NextResponse.json({ error: "ABR lookup failed" }, { status: 502 });
   }
-
-  // ABR returns JSONP-like response, parse it
-  // The response might be wrapped in a callback or be plain JSON
-  const abnData = data as Record<string, unknown>;
-
-  if (abnData.Message) {
-    return NextResponse.json({ error: abnData.Message as string }, { status: 404 });
-  }
-
-  const entityName = abnData.EntityName as string || "";
-  const entityType = abnData.EntityTypeName as string || "";
-  const state = abnData.AddressState as string || "";
-  const postcode = abnData.AddressPostcode as string || "";
-  const isActive = abnData.AbnStatus as string === "Active";
-
-  // Get business names
-  const businessNames: string[] = [];
-  const bnList = abnData.BusinessName as Record<string, string>[] | undefined;
-  if (Array.isArray(bnList)) {
-    bnList.forEach((bn) => {
-      if (bn.Value) businessNames.push(bn.Value);
-    });
-  }
-
-  return NextResponse.json({
-    abn,
-    company_name: entityName,
-    entity_type: entityType,
-    business_names: businessNames,
-    state,
-    postcode,
-    is_active: isActive,
-  });
 }
