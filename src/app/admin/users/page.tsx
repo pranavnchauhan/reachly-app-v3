@@ -7,6 +7,7 @@ import {
   Trash2, KeyRound, CheckCircle, XCircle, Save, X,
   Shield, User, UserCog, Calendar, Clock,
 } from "lucide-react";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 interface UserData {
   id: string;
@@ -28,6 +29,12 @@ export default function UsersPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<UserData>>({});
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [deleteModal, setDeleteModal] = useState<{
+    user: UserData;
+    title: string;
+    message: string;
+    severity: "info" | "warning" | "danger";
+  } | null>(null);
 
   async function loadUsers() {
     setLoading(true);
@@ -61,39 +68,41 @@ export default function UsersPage() {
     });
     const impact = await checkRes.json();
 
-    let confirmed = false;
-
     if (impact.impact === "clean") {
-      // No data — simple confirmation
-      confirmed = confirm(`Delete ${user.full_name || user.email}? This user has no niches or leads.`);
+      setDeleteModal({
+        user,
+        title: `Delete ${user.full_name || user.email}?`,
+        message: "This user has no niches, leads, or credits.\nThey will be permanently removed.",
+        severity: "info",
+      });
     } else if (impact.impact === "safe") {
-      // Shared niche — safe to delete
-      confirmed = confirm(
-        `Delete ${user.full_name || user.email}?\n\n` +
-        `This user has ${impact.nicheCount} niche(s) and ${impact.leadCount} lead(s), ` +
-        `but other users share the same niche template (${impact.sharedUsers.join(", ")}).\n\n` +
-        `Deleting this user will NOT affect the client's operations — ` +
-        `niches and leads will be preserved.\n\n` +
-        `${impact.creditBalance > 0 ? `⚠️ This user has ${impact.creditBalance} unused credits.\n\n` : ""}` +
-        `Do you want to proceed?`
-      );
+      setDeleteModal({
+        user,
+        title: `Delete ${user.full_name || user.email}?`,
+        message:
+          `This user has ${impact.nicheCount} niche(s) and ${impact.leadCount} lead(s), but other users share the same niche template:\n\n` +
+          `${impact.sharedUsers.join(", ")}\n\n` +
+          `Deleting this user will NOT affect the client's operations — niches and leads will be preserved.` +
+          `${impact.creditBalance > 0 ? `\n\nNote: This user has ${impact.creditBalance} unused credits.` : ""}`,
+        severity: "warning",
+      });
     } else {
-      // Destructive — sole user
-      confirmed = confirm(
-        `⚠️ WARNING: Delete ${user.full_name || user.email}?\n\n` +
-        `This is the ONLY user attached to:\n` +
-        `• ${impact.nicheCount} niche(s)\n` +
-        `• ${impact.leadCount} lead(s)\n` +
-        `${impact.creditBalance > 0 ? `• ${impact.creditBalance} unused credits\n` : ""}` +
-        `\nDeleting this user will deactivate their niches and orphan all associated data. ` +
-        `Leads will be preserved but no longer accessible to any client.\n\n` +
-        `Are you sure you want to proceed?`
-      );
+      setDeleteModal({
+        user,
+        title: `Delete ${user.full_name || user.email}?`,
+        message:
+          `This is the ONLY user attached to:\n\n` +
+          `• ${impact.nicheCount} niche(s)\n` +
+          `• ${impact.leadCount} lead(s)` +
+          `${impact.creditBalance > 0 ? `\n• ${impact.creditBalance} unused credits` : ""}` +
+          `\n\nDeleting this user will deactivate their niches and orphan all associated data. Leads will be preserved but no longer accessible to any client.`,
+        severity: "danger",
+      });
     }
+  }
 
-    if (!confirmed) return;
-
-    // Execute deletion
+  async function executeDelete(user: UserData) {
+    setDeleteModal(null);
     const res = await fetch("/api/admin/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -337,6 +346,20 @@ export default function UsersPage() {
             );
           })}
         </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteModal && (
+        <ConfirmModal
+          open={true}
+          title={deleteModal.title}
+          message={deleteModal.message}
+          severity={deleteModal.severity}
+          confirmLabel="Delete User"
+          cancelLabel="Cancel"
+          onConfirm={() => executeDelete(deleteModal.user)}
+          onCancel={() => setDeleteModal(null)}
+        />
       )}
     </div>
   );
