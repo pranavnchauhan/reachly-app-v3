@@ -18,7 +18,9 @@ export async function GET() {
     confirmed: !!u.email_confirmed_at,
   }));
 
-  const { data: profiles } = await supabase.from("profiles").select("id, role, full_name, company_name, account_status, archived_at, archive_expires_at");
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("id, role, full_name, company_name, company_id, account_status, archived_at, archive_expires_at");
   const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
 
   const enriched = users.map((u) => ({
@@ -26,6 +28,7 @@ export async function GET() {
     role: profileMap.get(u.id)?.role || "client",
     full_name: profileMap.get(u.id)?.full_name || u.full_name,
     company_name: profileMap.get(u.id)?.company_name || u.company_name,
+    company_id: profileMap.get(u.id)?.company_id || null,
     account_status: profileMap.get(u.id)?.account_status || "active",
     archived_at: profileMap.get(u.id)?.archived_at || null,
     archive_expires_at: profileMap.get(u.id)?.archive_expires_at || null,
@@ -34,7 +37,7 @@ export async function GET() {
   return NextResponse.json({ users: enriched });
 }
 
-// POST — update user, delete user, or reset password
+// POST — update, check_delete, delete, reset_password, confirm_email
 export async function POST(request: Request) {
   const { action, userId, data, callerRole } = await request.json();
   const supabase = createAdminClient();
@@ -63,16 +66,24 @@ export async function POST(request: Request) {
     }
 
     case "check_delete": {
-      // Pre-flight check before deletion — returns impact assessment
+      // Get user's profile to find their company
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("company_id")
+        .eq("id", userId)
+        .single();
+
+      const companyId = profile?.company_id;
+
+      // Get niches linked to this user directly
       const { data: userNiches } = await supabase
         .from("client_niches")
-        .select("id, template_id")
+        .select("id, template_id, company_id")
         .eq("client_id", userId);
 
       const nicheIds = userNiches?.map((n) => n.id) ?? [];
-      const templateIds = userNiches?.map((n) => n.template_id) ?? [];
 
-      // Count leads attached to this user's niches
+      // Count leads
       let leadCount = 0;
       if (nicheIds.length > 0) {
         const { count } = await supabase
@@ -82,8 +93,21 @@ export async function POST(request: Request) {
         leadCount = count ?? 0;
       }
 
-      // Check if other users share the same templates (same niche type)
-      let sharedUsers: string[] = [];
+      // Check other users in same company
+      let companyUsers: string[] = [];
+      if (companyId) {
+        const { data: sameCompany } = await supabase
+          .from("profiles")
+          .select("id, full_name")
+          .eq("company_id", companyId)
+          .neq("id", userId);
+
+        companyUsers = (sameCompany || []).map((u) => u.full_name);
+      }
+
+      // Check other users sharing same niche templates
+      const templateIds = userNiches?.map((n) => n.template_id) ?? [];
+      let sharedNicheUsers: string[] = [];
       if (templateIds.length > 0) {
         const { data: otherNiches } = await supabase
           .from("client_niches")
@@ -91,66 +115,109 @@ export async function POST(request: Request) {
           .in("template_id", templateIds)
           .neq("client_id", userId);
 
-        sharedUsers = [...new Set(
+        sharedNicheUsers = [...new Set(
           (otherNiches || [])
             .filter((n) => n.client_id)
-            .map((n) => (n.profiles as unknown as { full_name: string })?.full_name || n.client_id)
+            .map((n) => (n.profiles as unknown as { full_name: string })?.full_name || "Unknown")
         )];
       }
 
-      // Get credit balance
+      // Credit balance
       const { data: creditPacks } = await supabase
         .from("credit_packs")
         .select("total_credits, used_credits")
         .eq("client_id", userId);
       const creditBalance = creditPacks?.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0) ?? 0;
 
-      const isShared = sharedUsers.length > 0;
+      const hasCompanyPeers = companyUsers.length > 0;
+      const hasSharedNiches = sharedNicheUsers.length > 0;
+      const hasData = nicheIds.length > 0 || leadCount > 0;
+
+      let impact: string;
+      if (!hasData) {
+        impact = "clean";
+      } else if (hasCompanyPeers) {
+        impact = "safe"; // Other users in same company will retain access
+      } else if (hasSharedNiches) {
+        impact = "safe";
+      } else {
+        impact = "destructive";
+      }
 
       return NextResponse.json({
         nicheCount: nicheIds.length,
         leadCount,
         creditBalance,
-        isShared,
-        sharedUsers,
-        impact: isShared
-          ? "safe" // Other users share this niche template — data stays
-          : nicheIds.length > 0 || leadCount > 0
-            ? "destructive" // Solo user — data will be orphaned/lost
-            : "clean", // No data to worry about
+        companyUsers,
+        sharedNicheUsers,
+        hasCompanyPeers,
+        impact,
       });
     }
 
     case "delete": {
-      // Staff cannot delete — must be admin
       if (callerRole === "staff") {
         return NextResponse.json({
           error: "Staff cannot delete users. Please contact an admin.",
         }, { status: 403 });
       }
 
-      // Get user info for audit log
+      // Get user's profile
       const { data: targetProfile } = await supabase
         .from("profiles")
-        .select("full_name, email, role")
+        .select("full_name, email, role, company_id")
         .eq("id", userId)
         .single();
 
-      // Orphan data — nullify client_id references
-      await supabase.from("client_niches").update({ client_id: null, is_active: false }).eq("client_id", userId);
+      const companyId = targetProfile?.company_id;
+
+      // Check if other users exist in the same company
+      let hasCompanyPeers = false;
+      if (companyId) {
+        const { count } = await supabase
+          .from("profiles")
+          .select("*", { count: "exact", head: true })
+          .eq("company_id", companyId)
+          .neq("id", userId);
+        hasCompanyPeers = (count ?? 0) > 0;
+      }
+
+      if (hasCompanyPeers) {
+        // Other users in same company — just detach user, leave niches + data intact
+        // Niches with company_id will still be accessible to other company users
+        // Only orphan niches that are directly linked to this user without company_id
+        await supabase
+          .from("client_niches")
+          .update({ client_id: null, is_active: false })
+          .eq("client_id", userId)
+          .is("company_id", null); // Only orphan niches without company link
+
+        // For niches with company_id, just remove the user link
+        await supabase
+          .from("client_niches")
+          .update({ client_id: null })
+          .eq("client_id", userId)
+          .not("company_id", "is", null); // Keep active, just detach user
+      } else {
+        // Solo user — orphan everything
+        await supabase
+          .from("client_niches")
+          .update({ client_id: null, is_active: false })
+          .eq("client_id", userId);
+      }
+
+      // Orphan credit and dispute records
       await supabase.from("credit_transactions").update({ client_id: null }).eq("client_id", userId);
       await supabase.from("credit_packs").update({ client_id: null }).eq("client_id", userId);
       await supabase.from("disputes").update({ client_id: null }).eq("client_id", userId);
-      await supabase.from("signal_requests").update({ client_id: null }).eq("client_id", userId);
+      await supabase.from("signal_requests").delete().eq("client_id", userId);
 
-      // Delete profile and auth user
+      // Delete profile and auth user (company stays)
       await supabase.from("profiles").delete().eq("id", userId);
       const { error } = await supabase.auth.admin.deleteUser(userId);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-      // Log the deletion (insert into a simple audit log)
-      // For now, console.log — can be moved to a DB table later
-      console.log(`[AUDIT] User deleted: ${targetProfile?.full_name} (${targetProfile?.email}) by ${callerRole} at ${new Date().toISOString()}`);
+      console.log(`[AUDIT] User deleted: ${targetProfile?.full_name} (${targetProfile?.email}) | company_id: ${companyId} | peers: ${hasCompanyPeers} | by ${callerRole} at ${new Date().toISOString()}`);
 
       return NextResponse.json({ success: true });
     }
@@ -169,9 +236,7 @@ export async function POST(request: Request) {
     }
 
     case "confirm_email": {
-      const { error } = await supabase.auth.admin.updateUserById(userId, {
-        email_confirm: true,
-      });
+      const { error } = await supabase.auth.admin.updateUserById(userId, { email_confirm: true });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ success: true });
     }

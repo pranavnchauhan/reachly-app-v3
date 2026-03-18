@@ -168,7 +168,7 @@ export default function UsersPage() {
           `• ${impact.nicheCount} niche(s)\n` +
           `• ${impact.leadCount} lead(s)\n` +
           `${impact.creditBalance > 0 ? `• ${impact.creditBalance} unused credits\n` : ""}` +
-          `${impact.isShared ? `\nOther users share the same niche template — their data will not be affected.\n` : ""}` +
+          `${impact.hasCompanyPeers ? `\nOther users in the same company (${impact.companyUsers?.join(", ")}) — company data, niches and leads will be preserved.\n` : impact.sharedNicheUsers?.length > 0 ? `\nOther users share the same niche template — their data will not be affected.\n` : ""}` +
           `\nRecommendation: Archive first (retains data for 90 days) before permanent deletion.\n\nChoosing "Delete" will deactivate niches and orphan data.`,
         severity: "warning",
         confirmLabel: "Delete User",

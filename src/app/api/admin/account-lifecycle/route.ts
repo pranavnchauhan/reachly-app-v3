@@ -93,28 +93,81 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Only admins can permanently delete accounts" }, { status: 403 });
       }
 
-      // Get niches to find leads
+      // Get user's company
+      const { data: userProfile } = await supabase
+        .from("profiles")
+        .select("company_id")
+        .eq("id", userId)
+        .single();
+      const companyId = userProfile?.company_id;
+
+      // Check if other users in same company
+      let hasCompanyPeers = false;
+      if (companyId) {
+        const { count } = await supabase
+          .from("profiles")
+          .select("*", { count: "exact", head: true })
+          .eq("company_id", companyId)
+          .neq("id", userId);
+        hasCompanyPeers = (count ?? 0) > 0;
+      }
+
+      // Get niches linked to this user
       const { data: userNiches } = await supabase
         .from("client_niches")
-        .select("id")
+        .select("id, company_id")
         .eq("client_id", userId);
       const nicheIds = userNiches?.map((n) => n.id) ?? [];
 
-      // Delete everything permanently
-      if (nicheIds.length > 0) {
-        await supabase.from("leads").delete().in("client_niche_id", nicheIds);
-        await supabase.from("signal_requests").delete().in("client_niche_id", nicheIds);
+      if (hasCompanyPeers) {
+        // Other users in company — only delete user-specific data
+        // Detach niches that have company_id (keep them for company peers)
+        // Delete niches that are user-only (no company_id)
+        const userOnlyNiches = (userNiches || []).filter((n) => !n.company_id).map((n) => n.id);
+        if (userOnlyNiches.length > 0) {
+          await supabase.from("leads").delete().in("client_niche_id", userOnlyNiches);
+          await supabase.from("signal_requests").delete().in("client_niche_id", userOnlyNiches);
+          await supabase.from("client_niches").delete().in("id", userOnlyNiches);
+        }
+        // Detach company-linked niches from user
+        await supabase.from("client_niches").update({ client_id: null }).eq("client_id", userId);
+      } else {
+        // Solo user — delete ALL data including company
+        if (nicheIds.length > 0) {
+          await supabase.from("leads").delete().in("client_niche_id", nicheIds);
+          await supabase.from("signal_requests").delete().in("client_niche_id", nicheIds);
+        }
+        await supabase.from("client_niches").delete().eq("client_id", userId);
+        // Also delete niches linked via company_id
+        if (companyId) {
+          const { data: companyNiches } = await supabase
+            .from("client_niches")
+            .select("id")
+            .eq("company_id", companyId);
+          const companyNicheIds = companyNiches?.map((n) => n.id) ?? [];
+          if (companyNicheIds.length > 0) {
+            await supabase.from("leads").delete().in("client_niche_id", companyNicheIds);
+            await supabase.from("signal_requests").delete().in("client_niche_id", companyNicheIds);
+            await supabase.from("client_niches").delete().in("id", companyNicheIds);
+          }
+        }
       }
+
+      // Delete user-specific records
       await supabase.from("disputes").delete().eq("client_id", userId);
       await supabase.from("credit_transactions").delete().eq("client_id", userId);
       await supabase.from("credit_packs").delete().eq("client_id", userId);
-      await supabase.from("client_niches").delete().eq("client_id", userId);
       await supabase.from("profiles").delete().eq("id", userId);
       const { error } = await supabase.auth.admin.deleteUser(userId);
 
+      // Delete company if no more users
+      if (companyId && !hasCompanyPeers) {
+        await supabase.from("companies").delete().eq("id", companyId);
+      }
+
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-      console.log(`[AUDIT] HARD DELETE: user ${userId} permanently removed by ${callerRole} at ${new Date().toISOString()}`);
+      console.log(`[AUDIT] HARD DELETE: user ${userId} | company: ${companyId} (${hasCompanyPeers ? "kept" : "deleted"}) | by ${callerRole} at ${new Date().toISOString()}`);
       return NextResponse.json({ success: true, permanently_deleted: true });
     }
 
