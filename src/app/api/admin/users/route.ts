@@ -63,25 +63,16 @@ export async function POST(request: Request) {
     }
 
     case "delete": {
-      // Delete in correct order to respect FK constraints
-      // 1. Get client niches for this user
-      const { data: userNiches } = await supabase.from("client_niches").select("id").eq("client_id", userId);
-      const nicheIds = userNiches?.map((n) => n.id) ?? [];
+      // Orphan user's data — nullify client_id references so data is preserved
+      // Leads stay attached to client_niches (not directly to user)
+      await supabase.from("client_niches").update({ client_id: null, is_active: false }).eq("client_id", userId);
+      await supabase.from("credit_transactions").update({ client_id: null }).eq("client_id", userId);
+      await supabase.from("credit_packs").update({ client_id: null }).eq("client_id", userId);
+      await supabase.from("disputes").update({ client_id: null }).eq("client_id", userId);
+      await supabase.from("signal_requests").update({ client_id: null }).eq("client_id", userId);
 
-      // 2. Delete leads for these niches
-      if (nicheIds.length > 0) {
-        await supabase.from("leads").delete().in("client_niche_id", nicheIds);
-        await supabase.from("signal_requests").delete().in("client_niche_id", nicheIds);
-      }
-
-      // 3. Delete user's data
-      await supabase.from("disputes").delete().eq("client_id", userId);
-      await supabase.from("credit_transactions").delete().eq("client_id", userId);
-      await supabase.from("credit_packs").delete().eq("client_id", userId);
-      await supabase.from("client_niches").delete().eq("client_id", userId);
+      // Now safe to delete profile and auth user
       await supabase.from("profiles").delete().eq("id", userId);
-
-      // 4. Delete auth user
       const { error } = await supabase.auth.admin.deleteUser(userId);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ success: true });
