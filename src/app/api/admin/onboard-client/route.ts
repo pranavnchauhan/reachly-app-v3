@@ -89,12 +89,14 @@ export async function POST(request: Request) {
 
   // 5. Send welcome/password reset email
   if (sendWelcome) {
-    await supabase.auth.admin.generateLink({
-      type: "recovery",
-      email,
-      options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth/login`,
-      },
+    // Use resetPasswordForEmail which actually sends the email via SMTP
+    const { createClient: createServerClient } = await import("@supabase/supabase-js");
+    const anonClient = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    await anonClient.auth.resetPasswordForEmail(email, {
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth/login`,
     });
   }
 
