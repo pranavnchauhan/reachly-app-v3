@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Play, Loader2, CheckCircle, XCircle } from "lucide-react";
 
@@ -10,21 +9,100 @@ interface Niche {
   name: string;
 }
 
+interface PipelineProgress {
+  niche?: string;
+  step?: string;
+  hot?: number;
+  cold?: number;
+  enriched?: number;
+  researched?: number;
+}
+
+interface PipelineRun {
+  id: string;
+  status: "running" | "completed" | "failed";
+  current_step: string;
+  progress: PipelineProgress;
+  result?: {
+    batch_id: string;
+    results: Array<{
+      niche: string;
+      hot?: number;
+      cold?: number;
+      enriched?: number;
+      researched?: number;
+      leads?: number;
+      detail?: string;
+      step?: string;
+    }>;
+  };
+  error?: string;
+}
+
+const STEP_LABELS: Record<string, string> = {
+  starting: "Starting pipeline...",
+  loading_niches: "Loading niche configuration...",
+  discovering: "Searching news for buying signals...",
+  apollo_fallback: "Finding additional companies via Apollo...",
+  enriching: "Finding decision-maker contacts...",
+  researching: "AI-researching top leads...",
+  saving: "Saving leads to database...",
+  done: "Pipeline complete!",
+};
+
 export function PipelineTrigger({ niches }: { niches: Niche[] }) {
-  const router = useRouter();
   const [selectedNiche, setSelectedNiche] = useState<string>("all");
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [runData, setRunData] = useState<PipelineRun | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const supabase = createClient();
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
+
+  const pollStatus = useCallback(async (runId: string, token: string) => {
+    try {
+      const res = await fetch(`/api/pipeline/status/${runId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+
+      const data: PipelineRun = await res.json();
+      setRunData(data);
+
+      if (data.status === "completed" || data.status === "failed") {
+        stopPolling();
+        setRunning(false);
+        if (data.status === "completed") {
+          const totalLeads = data.result?.results?.reduce((sum, r) => sum + (r.leads || 0), 0) ?? 0;
+          if (totalLeads > 0) {
+            setTimeout(() => window.location.reload(), 1500);
+          }
+        }
+      }
+    } catch {
+      // Ignore poll errors — will retry
+    }
+  }, [stopPolling]);
 
   async function runPipeline() {
     setRunning(true);
-    setResult(null);
+    setRunData(null);
+    setError(null);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        setResult({ success: false, message: "Not authenticated" });
+        setError("Not authenticated");
         setRunning(false);
         return;
       }
@@ -43,56 +121,49 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
         body: JSON.stringify(body),
       });
 
-      const responseText = await response.text();
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch {
-        setResult({
-          success: false,
-          message: `Server error (likely timeout). Response: ${responseText.slice(0, 200)}`,
-        });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.run_id) {
+        setError(data?.error || "Failed to start pipeline");
         setRunning(false);
         return;
       }
 
-      if (response.ok) {
-        const totalLeads = data.results?.reduce(
-          (sum: number, r: Record<string, number>) => sum + (r.leads || 0),
-          0
-        ) ?? 0;
-        const stepDetails = data.results?.map(
-          (r: Record<string, unknown>) => {
-            const parts = [`${r.niche}`];
-            if (r.hot !== undefined || r.cold !== undefined) parts.push(`🔥 ${r.hot ?? 0} hot + 🧊 ${r.cold ?? 0} cold`);
-            if (r.enriched !== undefined) parts.push(`${r.enriched} enriched`);
-            if (r.researched !== undefined) parts.push(`${r.researched} researched`);
-            parts.push(`${r.leads ?? 0} leads`);
-            if (r.detail) parts.push(`(${r.detail})`);
-            if (r.step) parts.push(`[stopped at: ${r.step}]`);
-            return parts.join(" → ");
-          }
-        ).join("\n") ?? "";
-
-        setResult({
-          success: totalLeads > 0,
-          message: `Pipeline complete. ${totalLeads} leads discovered.\n${stepDetails}`,
-        });
-        if (totalLeads > 0) window.location.reload();
-      } else {
-        setResult({
-          success: false,
-          message: data.error || "Pipeline failed",
-        });
-      }
-    } catch (error) {
-      setResult({
-        success: false,
-        message: `Error: ${String(error)}`,
-      });
+      // Start polling
+      setRunData({ id: data.run_id, status: "running", current_step: "starting", progress: {} });
+      const token = session.access_token;
+      pollRef.current = setInterval(() => pollStatus(data.run_id, token), 3000);
+    } catch (err) {
+      setError(`Error: ${String(err)}`);
+      setRunning(false);
     }
+  }
 
-    setRunning(false);
+  const currentStep = runData?.current_step || "";
+  const stepLabel = runData?.progress?.step || STEP_LABELS[currentStep] || currentStep;
+  const isComplete = runData?.status === "completed";
+  const isFailed = runData?.status === "failed";
+
+  function renderResults() {
+    if (!runData?.result?.results) return null;
+    const totalLeads = runData.result.results.reduce((sum, r) => sum + (r.leads || 0), 0);
+
+    return (
+      <div className="mt-3 space-y-1">
+        {runData.result.results.map((r, i) => {
+          const parts = [r.niche];
+          if (r.hot !== undefined || r.cold !== undefined) parts.push(`🔥 ${r.hot ?? 0} hot + 🧊 ${r.cold ?? 0} cold`);
+          if (r.enriched !== undefined) parts.push(`${r.enriched} enriched`);
+          if (r.researched !== undefined) parts.push(`${r.researched} researched`);
+          parts.push(`${r.leads ?? 0} leads`);
+          if (r.detail) parts.push(`(${r.detail})`);
+          return <div key={i} className="text-xs text-muted">{parts.join(" → ")}</div>;
+        })}
+        <div className="text-sm font-medium mt-2">
+          {totalLeads > 0 ? `${totalLeads} leads discovered — reloading...` : "No leads found this run."}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -137,20 +208,50 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
         </button>
       </div>
 
-      {result && (
-        <div
-          className={`mt-4 flex items-start gap-2 p-3 rounded-lg text-sm ${
-            result.success
-              ? "bg-success/10 text-success"
-              : "bg-danger/10 text-danger"
-          }`}
-        >
-          {result.success ? (
-            <CheckCircle className="w-4 h-4 mt-0.5 shrink-0" />
-          ) : (
-            <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
+      {/* Live progress */}
+      {running && runData && (
+        <div className="mt-4 p-3 rounded-lg bg-primary/5 border border-primary/20">
+          <div className="flex items-center gap-2 text-sm text-primary">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className="font-medium">{stepLabel}</span>
+          </div>
+          {runData.progress?.niche && (
+            <div className="text-xs text-muted mt-1">Niche: {runData.progress.niche}</div>
           )}
-          <span className="whitespace-pre-wrap">{result.message}</span>
+          {(runData.progress?.hot !== undefined) && (
+            <div className="text-xs text-muted mt-1">
+              🔥 {runData.progress.hot} hot
+              {runData.progress.cold !== undefined && ` + 🧊 ${runData.progress.cold} cold`}
+              {runData.progress.enriched !== undefined && ` → ${runData.progress.enriched} enriched`}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Success */}
+      {isComplete && (
+        <div className="mt-4 flex items-start gap-2 p-3 rounded-lg text-sm bg-success/10 text-success">
+          <CheckCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div>
+            <span>Pipeline complete!</span>
+            {renderResults()}
+          </div>
+        </div>
+      )}
+
+      {/* Failure */}
+      {isFailed && (
+        <div className="mt-4 flex items-start gap-2 p-3 rounded-lg text-sm bg-danger/10 text-danger">
+          <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>{runData?.error || "Pipeline failed"}</span>
+        </div>
+      )}
+
+      {/* Startup error (before pipeline even begins) */}
+      {error && !runData && (
+        <div className="mt-4 flex items-start gap-2 p-3 rounded-lg text-sm bg-danger/10 text-danger">
+          <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
     </div>

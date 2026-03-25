@@ -11,33 +11,103 @@ const CRON_SECRET = process.env.CRON_SECRET;
 
 export const maxDuration = 300; // 5 minutes (Vercel Pro)
 
-export async function POST(request: Request) {
-  // Auth: either cron secret or admin user
+// ─── Auth helper ────────────────────────────────────────────────────
+async function authenticateRequest(request: Request): Promise<{ authorized: boolean; userId?: string }> {
   const authHeader = request.headers.get("authorization");
-  const { nicheId, secret } = await request.json().catch(() => ({ nicheId: null, secret: null }));
+  const body = await request.clone().json().catch(() => ({}));
+  const { secret } = body as { secret?: string };
 
-  if (CRON_SECRET && secret !== CRON_SECRET && authHeader !== `Bearer ${CRON_SECRET}`) {
-    const adminClient = createAdminClient();
-    const token = authHeader?.replace("Bearer ", "");
-    if (token) {
-      const { data: { user } } = await adminClient.auth.getUser(token);
-      if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      const { data: profile } = await adminClient.from("profiles").select("role").eq("id", user.id).single();
-      if (profile?.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    } else {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  // Cron secret auth
+  if (CRON_SECRET && (secret === CRON_SECRET || authHeader === `Bearer ${CRON_SECRET}`)) {
+    return { authorized: true };
   }
+
+  // User token auth
+  const token = authHeader?.replace("Bearer ", "");
+  if (!token) return { authorized: false };
+
+  const adminClient = createAdminClient();
+  const { data: { user } } = await adminClient.auth.getUser(token);
+  if (!user) return { authorized: false };
+
+  const { data: profile } = await adminClient.from("profiles").select("role").eq("id", user.id).single();
+  if (!profile || (profile.role !== "admin" && profile.role !== "staff")) return { authorized: false };
+
+  return { authorized: true, userId: user.id };
+}
+
+// ─── POST: Kick off pipeline (returns immediately) ──────────────────
+export async function POST(request: Request) {
+  const auth = await authenticateRequest(request);
+  if (!auth.authorized) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  const { nicheId } = body as { nicheId?: string };
 
   const supabase = createAdminClient();
 
+  // Create a pipeline run record
+  const { data: run, error: runError } = await supabase
+    .from("pipeline_runs")
+    .insert({
+      niche_id: nicheId || null,
+      status: "running",
+      current_step: "starting",
+      progress: {},
+      started_by: auth.userId || null,
+    })
+    .select("id")
+    .single();
+
+  if (runError || !run) {
+    return NextResponse.json({ error: "Failed to create pipeline run", details: runError?.message }, { status: 500 });
+  }
+
+  // Fire and forget — run pipeline in background
+  executePipeline(run.id, nicheId || null).catch((err) => {
+    console.error("Background pipeline crashed:", err);
+  });
+
+  return NextResponse.json({ run_id: run.id, status: "running" });
+}
+
+// ─── Background pipeline execution ─────────────────────────────────
+async function executePipeline(runId: string, nicheId: string | null) {
+  const supabase = createAdminClient();
+
+  async function updateRun(current_step: string, progress: Record<string, unknown>) {
+    await supabase
+      .from("pipeline_runs")
+      .update({ current_step, progress })
+      .eq("id", runId);
+  }
+
+  async function failRun(error: string) {
+    await supabase
+      .from("pipeline_runs")
+      .update({ status: "failed", error, completed_at: new Date().toISOString() })
+      .eq("id", runId);
+  }
+
+  async function completeRun(result: unknown) {
+    await supabase
+      .from("pipeline_runs")
+      .update({ status: "completed", current_step: "done", result, completed_at: new Date().toISOString() })
+      .eq("id", runId);
+  }
+
   try {
+    // Load niches
+    await updateRun("loading_niches", {});
     let query = supabase.from("client_niches").select("*, niche_templates(*)").eq("is_active", true);
     if (nicheId) query = query.eq("id", nicheId);
     const { data: niches, error: nicheError } = await query;
 
     if (nicheError || !niches?.length) {
-      return NextResponse.json({ message: "No active niches to process", error: nicheError?.message });
+      await failRun(nicheError?.message || "No active niches to process");
+      return;
     }
 
     const results = [];
@@ -47,33 +117,37 @@ export async function POST(request: Request) {
       const template = niche.niche_templates;
       if (!template) continue;
 
-      console.log(`Processing niche: ${niche.name} (${niche.id})`);
-
-      // Get enabled signals (max 5 for API efficiency)
       const allSignals = (template.signals as Signal[]) || [];
       const enabledSignals = niche.enabled_signals?.length
-        ? allSignals.filter((s) => niche.enabled_signals.includes(s.id))
+        ? allSignals.filter((s: Signal) => niche.enabled_signals.includes(s.id))
         : allSignals;
       const signalsToSearch = enabledSignals.slice(0, 5);
 
-      // ─── Step 1: Signal-first discovery (Perplexity) ───────────────
-      let discovered = await discoverSignals(
-        signalsToSearch,
-        niche.geography || []
-      );
-      console.log(`  Perplexity found ${discovered.length} companies from news`);
+      // ─── Step 1: Signal discovery (Perplexity) ──────────────────
+      await updateRun("discovering", { niche: niche.name, step: "Searching news for buying signals..." });
 
+      let discovered = await discoverSignals(signalsToSearch, niche.geography || []);
       const hotCount = discovered.length;
 
-      // ─── Step 2: Apollo fallback if < 20 ───────────────────────────
+      await updateRun("discovering", { niche: niche.name, step: `Found ${hotCount} companies from news`, hot: hotCount });
+
+      // ─── Step 2: Apollo fallback ────────────────────────────────
       if (discovered.length < 20) {
+        await updateRun("apollo_fallback", { niche: niche.name, step: "Filling remaining slots from Apollo..." });
+
         discovered = await apolloFallback(
           discovered,
           template.keywords || [],
           template.industries || [],
           niche.geography || []
         );
-        console.log(`  After Apollo fallback: ${discovered.length} total (${discovered.length - hotCount} cold)`);
+
+        await updateRun("apollo_fallback", {
+          niche: niche.name,
+          step: `${discovered.length} total companies (${hotCount} hot, ${discovered.length - hotCount} cold)`,
+          hot: hotCount,
+          cold: discovered.length - hotCount,
+        });
       }
 
       if (discovered.length === 0) {
@@ -81,8 +155,9 @@ export async function POST(request: Request) {
         continue;
       }
 
-      // ─── Step 3: Enrich contacts (Apollo people/match) ─────────────
-      // Convert discovered companies to SignalResult format for enrichment
+      // ─── Step 3: Enrich contacts ────────────────────────────────
+      await updateRun("enriching", { niche: niche.name, step: "Finding decision-maker contacts..." });
+
       const signalResults: SignalResult[] = discovered.map((d) => ({
         company: {
           name: d.name,
@@ -103,8 +178,13 @@ export async function POST(request: Request) {
         total_score: d.confidence * 10,
       }));
 
-      let enrichedLeads = await enrichContacts(signalResults, template.target_titles || []);
-      console.log(`  ${enrichedLeads.length} leads with contacts`);
+      const enrichedLeads = await enrichContacts(signalResults, template.target_titles || []);
+
+      await updateRun("enriching", {
+        niche: niche.name,
+        step: `${enrichedLeads.length} leads with contacts`,
+        enriched: enrichedLeads.length,
+      });
 
       if (enrichedLeads.length === 0) {
         results.push({
@@ -118,14 +198,14 @@ export async function POST(request: Request) {
         continue;
       }
 
-      // ─── Step 4: Deep research (Claude) — top 5 ───────────────────
+      // ─── Step 4: Deep research (top 5) ──────────────────────────
+      await updateRun("researching", { niche: niche.name, step: "AI-researching top leads..." });
+
       let researchedLeads = await deepResearch(
         enrichedLeads.slice(0, 5),
         template.description || template.name
       );
-      console.log(`  ${researchedLeads.length} leads fully researched`);
 
-      // Add remaining enriched leads without deep research
       if (enrichedLeads.length > 5) {
         const remaining = enrichedLeads.slice(5).map((lead) => ({
           ...lead,
@@ -137,13 +217,19 @@ export async function POST(request: Request) {
         researchedLeads = [...researchedLeads, ...remaining];
       }
 
-      // ─── Step 5: Store leads ──────────────────────────────────────
-      const leadsToInsert = researchedLeads.map((lead, idx) => {
-        // Find the original discovered company to get source
+      await updateRun("researching", {
+        niche: niche.name,
+        step: `${researchedLeads.length} leads fully processed`,
+        researched: Math.min(enrichedLeads.length, 5),
+      });
+
+      // ─── Step 5: Store leads ────────────────────────────────────
+      await updateRun("saving", { niche: niche.name, step: "Saving leads to database..." });
+
+      const leadsToInsert = researchedLeads.map((lead) => {
         const original = discovered.find(
           (d) => d.name.toLowerCase() === lead.company.name.toLowerCase()
         );
-
         return {
           client_niche_id: niche.id,
           company_name: lead.company.name,
@@ -166,12 +252,11 @@ export async function POST(request: Request) {
           email_templates: lead.email_templates,
           status: "discovered" as const,
           batch_id: batchId,
-          // Store source in signals_matched for now (lead_source field can be added to schema later)
         };
       });
 
       const { error: insertError } = await supabase.from("leads").insert(leadsToInsert);
-      if (insertError) console.error("  Insert error:", insertError);
+      if (insertError) console.error("Insert error:", insertError);
 
       results.push({
         niche: niche.name,
@@ -183,13 +268,14 @@ export async function POST(request: Request) {
       });
     }
 
-    return NextResponse.json({ message: "Pipeline completed", batch_id: batchId, results });
+    await completeRun({ batch_id: batchId, results });
   } catch (error) {
     console.error("Pipeline error:", error);
-    return NextResponse.json({ error: "Pipeline failed", details: String(error) }, { status: 500 });
+    await failRun(String(error));
   }
 }
 
+// ─── GET: Cron handler ──────────────────────────────────────────────
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
   if (CRON_SECRET && authHeader !== `Bearer ${CRON_SECRET}`) {
