@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: Request) {
-  const { companyId, clientId, amount, description } = await request.json();
+  const { companyId, clientId, amount, description, validityMonths } = await request.json();
 
   if (!amount || amount < 1) {
     return NextResponse.json({ error: "Amount must be at least 1" }, { status: 400 });
@@ -10,7 +10,12 @@ export async function POST(request: Request) {
 
   const supabase = createAdminClient();
 
-  // Create credit pack (company-level or user-level)
+  // Calculate expiry (default 4 months if not specified)
+  const months = validityMonths || 4;
+  const expiresAt = new Date();
+  expiresAt.setMonth(expiresAt.getMonth() + months);
+
+  // Create credit pack
   const { data: pack, error: packError } = await supabase
     .from("credit_packs")
     .insert({
@@ -18,6 +23,7 @@ export async function POST(request: Request) {
       client_id: clientId || null,
       total_credits: amount,
       used_credits: 0,
+      expires_at: expiresAt.toISOString(),
     })
     .select()
     .single();
@@ -33,7 +39,7 @@ export async function POST(request: Request) {
     credit_pack_id: pack.id,
     type: "purchase",
     amount,
-    description: description || `Added ${amount} credits (admin)`,
+    description: description || `Added ${amount} credits (admin) — valid for ${months} months`,
   });
 
   return NextResponse.json({ pack });

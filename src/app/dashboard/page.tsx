@@ -38,15 +38,18 @@ export default async function ClientDashboard() {
           .eq("status", "revealed")
           .in("client_niche_id", nicheIds)
       : { count: 0 },
-    supabase.from("credit_packs").select("total_credits, used_credits").eq("client_id", user.id),
+    supabase.from("credit_packs").select("total_credits, used_credits, expires_at").eq("client_id", user.id),
     companyId
-      ? supabase.from("credit_packs").select("total_credits, used_credits").eq("company_id", companyId)
+      ? supabase.from("credit_packs").select("total_credits, used_credits, expires_at").eq("company_id", companyId)
       : { data: [] },
     supabase.from("client_niches").select("*", { count: "exact", head: true }).eq("client_id", user.id).eq("is_active", true),
   ]);
 
   const allPacks = [...(userPacks || []), ...(companyPacks || [])];
-  const totalCredits = allPacks.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0);
+  const now = new Date();
+  const totalCredits = allPacks
+    .filter((p) => !p.expires_at || new Date(p.expires_at) > now)
+    .reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0);
 
   const stats = [
     { label: "New Leads", value: availableLeads ?? 0, icon: Zap, color: "text-primary", href: "/dashboard/leads" },

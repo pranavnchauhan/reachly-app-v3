@@ -25,14 +25,15 @@ export async function POST(request: Request) {
     .single();
 
   const companyId = profile?.company_id;
+  const now = new Date().toISOString();
 
-  // Find active credit pack — check company-level first, then user-level (FIFO order)
-  const packs: { id: string; total_credits: number; used_credits: number; company_id: string | null }[] = [];
+  // Find active credit pack — FIFO, skip expired packs
+  const packs: { id: string; total_credits: number; used_credits: number; company_id: string | null; expires_at: string | null }[] = [];
 
   if (companyId) {
     const { data: companyPacks } = await supabase
       .from("credit_packs")
-      .select("id, total_credits, used_credits, company_id")
+      .select("id, total_credits, used_credits, company_id, expires_at")
       .eq("company_id", companyId)
       .order("purchased_at", { ascending: true });
     if (companyPacks) packs.push(...companyPacks);
@@ -40,16 +41,38 @@ export async function POST(request: Request) {
 
   const { data: userPacks } = await supabase
     .from("credit_packs")
-    .select("id, total_credits, used_credits, company_id")
+    .select("id, total_credits, used_credits, company_id, expires_at")
     .eq("client_id", clientId)
     .is("company_id", null)
     .order("purchased_at", { ascending: true });
   if (userPacks) packs.push(...userPacks);
 
-  const activePack = packs.find((p) => p.total_credits - p.used_credits > 0);
+  // Find first pack with remaining credits that hasn't expired
+  const activePack = packs.find((p) => {
+    const hasCredits = p.total_credits - p.used_credits > 0;
+    const isValid = !p.expires_at || new Date(p.expires_at) > new Date(now);
+    return hasCredits && isValid;
+  });
 
   if (!activePack) {
-    return NextResponse.json({ error: "No credits available" }, { status: 402 });
+    // Check if they had credits but all expired
+    const hasExpiredCredits = packs.some((p) => {
+      const hasCredits = p.total_credits - p.used_credits > 0;
+      const isExpired = p.expires_at && new Date(p.expires_at) <= new Date(now);
+      return hasCredits && isExpired;
+    });
+
+    if (hasExpiredCredits) {
+      return NextResponse.json({
+        error: "credits_expired",
+        message: "Your credits have expired. Purchase a new pack to continue revealing leads — any remaining balance will be rolled over.",
+      }, { status: 402 });
+    }
+
+    return NextResponse.json({
+      error: "no_credits",
+      message: "No credits available. Purchase a credit pack to start revealing leads.",
+    }, { status: 402 });
   }
 
   // Deduct credit and reveal lead
