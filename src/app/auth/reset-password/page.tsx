@@ -2,11 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Suspense } from "react";
 
-function ResetPasswordForm() {
+export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -15,68 +14,29 @@ function ResetPasswordForm() {
   const [sessionReady, setSessionReady] = useState(false);
   const [checking, setChecking] = useState(true);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const supabase = createClient();
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function init() {
-      const code = searchParams.get("code");
-
-      // If there's a code param, exchange it for a session (PKCE flow)
-      if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (!cancelled) {
-          if (!error) {
-            setSessionReady(true);
-            setChecking(false);
-            // Remove code from URL so refresh doesn't re-exchange
-            window.history.replaceState({}, "", "/auth/reset-password");
-          } else {
-            console.error("Code exchange failed:", error.message);
-            setChecking(false);
-          }
+    // Listen for recovery event (hash-based flow or session already set by callback)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event) => {
+        if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
+          setSessionReady(true);
+          setChecking(false);
         }
-        return;
       }
+    );
 
-      // If URL has a hash, Supabase implicit flow puts tokens there
-      if (window.location.hash.length > 1) {
-        // Listen for the auth state change
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-          if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
-            if (!cancelled) {
-              setSessionReady(true);
-              setChecking(false);
-            }
-          }
-        });
-
-        // Give it a few seconds
-        setTimeout(() => {
-          if (!cancelled) setChecking(false);
-        }, 5000);
-
-        return () => {
-          subscription.unsubscribe();
-          cancelled = true;
-        };
+    // Check if user already has a session (set by /auth/callback redirect)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setSessionReady(true);
       }
+      setChecking(false);
+    });
 
-      // No code, no hash — check for existing session
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!cancelled) {
-        if (session) setSessionReady(true);
-        setChecking(false);
-      }
-    }
-
-    init();
-
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => subscription.unsubscribe();
+  }, [supabase.auth]);
 
   async function handleReset(e: React.FormEvent) {
     e.preventDefault();
@@ -234,17 +194,5 @@ function ResetPasswordForm() {
         </form>
       </div>
     </div>
-  );
-}
-
-export default function ResetPasswordPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <p className="text-muted">Verifying reset link...</p>
-      </div>
-    }>
-      <ResetPasswordForm />
-    </Suspense>
   );
 }
