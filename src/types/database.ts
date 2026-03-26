@@ -2,6 +2,19 @@ export type UserRole = "admin" | "staff" | "client";
 
 export type LeadStatus = "discovered" | "validated" | "published" | "revealed" | "disputed" | "refunded";
 
+export type LeadDisposition = "revealed" | "contacted" | "meeting_booked" | "proposal_sent" | "won" | "lost" | "parked";
+
+export type NoteType = "note" | "contacted" | "voicemail" | "email_sent" | "meeting" | "status_change";
+
+export interface LeadNote {
+  id: string;
+  lead_id: string;
+  client_id: string;
+  type: NoteType;
+  content: string;
+  created_at: string;
+}
+
 export type SignalRequestStatus = "pending" | "approved" | "rejected";
 
 export type CreditTransactionType = "purchase" | "debit" | "refund";

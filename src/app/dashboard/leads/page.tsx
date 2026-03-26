@@ -26,13 +26,20 @@ export default async function ClientLeadsPage() {
         .order("published_at", { ascending: false })
     : { data: [] };
 
-  // Get credit balance
-  const { data: creditPacks } = await supabase
+  // Get credit balance (non-expired, user + company level)
+  const { data: profile } = await supabase.from("profiles").select("company_id").eq("id", user.id).single();
+  const { data: userPacks } = await supabase
     .from("credit_packs")
-    .select("total_credits, used_credits")
+    .select("total_credits, used_credits, expires_at")
     .eq("client_id", user.id);
+  const { data: companyPacks } = profile?.company_id
+    ? await supabase.from("credit_packs").select("total_credits, used_credits, expires_at").eq("company_id", profile.company_id)
+    : { data: [] };
 
-  const creditBalance = creditPacks?.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0) ?? 0;
+  const now = new Date();
+  const creditBalance = [...(userPacks || []), ...(companyPacks || [])]
+    .filter((p) => !p.expires_at || new Date(p.expires_at) > now)
+    .reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0);
 
   return (
     <div>
