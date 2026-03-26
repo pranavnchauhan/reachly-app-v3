@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendEmail, leadRevealedEmail, creditLowEmail } from "@/lib/email";
 
 export async function POST(request: Request) {
   const supabase = createAdminClient();
@@ -107,6 +108,42 @@ export async function POST(request: Request) {
     .select("*")
     .eq("id", leadId)
     .single();
+
+  // ─── Send notification emails (fire and forget) ────────────────────
+  const { data: clientProfile } = await supabase
+    .from("profiles")
+    .select("email, full_name")
+    .eq("id", clientId)
+    .single();
+
+  if (clientProfile && revealedLead) {
+    const firstName = clientProfile.full_name.split(" ")[0];
+
+    // 1. Reveal confirmation with contact details
+    const revealEmail = leadRevealedEmail(
+      firstName,
+      revealedLead.company_name,
+      revealedLead.contact_name,
+      revealedLead.contact_title,
+      revealedLead.contact_email,
+      revealedLead.contact_phone,
+      revealedLead.contact_linkedin,
+    );
+    sendEmail({ to: clientProfile.email, toName: clientProfile.full_name, ...revealEmail }).catch(() => {});
+
+    // 2. Low credit warning (check remaining after this deduction)
+    const remainingCredits = activePack.total_credits - activePack.used_credits - 1;
+    // Also count other active packs
+    const otherRemaining = packs
+      .filter((p) => p.id !== activePack.id && (!p.expires_at || new Date(p.expires_at) > new Date()) && p.total_credits - p.used_credits > 0)
+      .reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0);
+    const totalRemaining = remainingCredits + otherRemaining;
+
+    if (totalRemaining <= 2 && totalRemaining >= 0) {
+      const lowEmail = creditLowEmail(firstName, totalRemaining);
+      sendEmail({ to: clientProfile.email, toName: clientProfile.full_name, ...lowEmail }).catch(() => {});
+    }
+  }
 
   return NextResponse.json({ lead: revealedLead });
 }
