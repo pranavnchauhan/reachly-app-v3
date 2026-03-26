@@ -231,6 +231,15 @@ create policy "Admins manage all disputes" on disputes for all using (
   exists (select 1 from profiles where id = auth.uid() and role = 'admin')
 );
 
+-- Companies: clients view own, admins manage all
+alter table companies enable row level security;
+create policy "Clients view own company" on companies for select using (
+  id in (select company_id from profiles where id = auth.uid())
+);
+create policy "Admins manage companies" on companies for all using (
+  exists (select 1 from profiles where id = auth.uid() and role in ('admin', 'staff'))
+);
+
 -- Auto-create profile on signup
 create or replace function handle_new_user()
 returns trigger as $$
