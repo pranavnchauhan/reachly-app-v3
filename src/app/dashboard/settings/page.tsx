@@ -205,7 +205,7 @@ export default async function SettingsPage() {
           Want to update your targeting, add new niches, or have questions about your leads?
         </p>
         <a
-          href="mailto:hello@reachly.com.au"
+          href="mailto:info@reachly.com.au"
           className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors"
         >
           <Mail className="w-4 h-4" /> Contact Support
