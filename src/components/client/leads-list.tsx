@@ -42,13 +42,15 @@ function Collapsible({ title, badge, children, defaultOpen = false }: {
     <div className="border border-border/50 rounded-xl overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between p-4 hover:bg-background/50 transition-colors text-left"
+        className="w-full flex items-center justify-between p-4 hover:bg-background/50 transition-colors text-left gap-3"
       >
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-sm">{title}</span>
-          {badge && <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">{badge}</span>}
+        <div className="flex-1 min-w-0">
+          <span className="font-semibold text-sm block">{title}</span>
+          {badge && <span className="text-xs text-primary mt-1 block leading-snug">{badge}</span>}
         </div>
-        {open ? <ChevronDown className="w-4 h-4 text-muted" /> : <ChevronRight className="w-4 h-4 text-muted" />}
+        <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+          {open ? <ChevronDown className="w-4 h-4 text-muted" /> : <ChevronRight className="w-4 h-4 text-muted" />}
+        </div>
       </button>
       {open && <div className="px-4 pb-4 border-t border-border/30">{children}</div>}
     </div>
@@ -260,10 +262,10 @@ export function ClientLeadsList({
                     <tab.icon className="w-3.5 h-3.5" />
                     {tab.label}
                     {tab.id === "signals" && selectedLead.signals_matched?.length > 0 && (
-                      <span className="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full">{selectedLead.signals_matched.length}</span>
+                      <span className="text-xs bg-accent/10 text-accent px-1.5 py-0.5 rounded-full">{selectedLead.signals_matched.length}</span>
                     )}
                     {tab.id === "emails" && selectedLead.email_templates?.length > 0 && (
-                      <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">{selectedLead.email_templates.length}</span>
+                      <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">{selectedLead.email_templates.length}</span>
                     )}
                   </button>
                 ))}
