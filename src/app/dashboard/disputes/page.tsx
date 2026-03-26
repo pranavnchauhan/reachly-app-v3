@@ -1,4 +1,3 @@
-export const dynamic = "force-dynamic";
 
 import { getUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";

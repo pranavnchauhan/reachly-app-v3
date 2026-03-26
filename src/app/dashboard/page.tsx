@@ -1,4 +1,3 @@
-export const dynamic = "force-dynamic";
 
 import { getUser } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -20,16 +19,14 @@ export default async function ClientDashboard() {
   const user = await getUser();
   const supabase = createAdminClient();
 
-  const { data: niches } = await supabase
-    .from("client_niches")
-    .select("id, name")
-    .eq("client_id", user.id)
-    .eq("is_active", true);
+  // Parallel: fetch niches + profile at the same time
+  const [{ data: niches }, { data: profileData }] = await Promise.all([
+    supabase.from("client_niches").select("id, name").eq("client_id", user.id).eq("is_active", true),
+    supabase.from("profiles").select("company_id").eq("id", user.id).single(),
+  ]);
 
   const nicheIds = niches?.map((n) => n.id) ?? [];
-
-  const { data: profile } = await supabase.from("profiles").select("company_id").eq("id", user.id).single();
-  const companyId = profile?.company_id;
+  const companyId = profileData?.company_id;
 
   const [
     { count: availableLeads },

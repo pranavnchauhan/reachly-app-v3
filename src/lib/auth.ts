@@ -1,14 +1,15 @@
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { redirect } from "next/navigation";
 import type { UserRole } from "@/types/database";
 
-export async function getUser() {
+// cache() deduplicates within a single request — layout + page share one call
+export const getUser = cache(async () => {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/auth/login");
 
-  // Use admin client to bypass RLS for profile lookup
   const adminClient = createAdminClient();
 
   const { data: profile } = await adminClient
@@ -19,7 +20,6 @@ export async function getUser() {
 
   if (profile) return profile;
 
-  // Auto-create profile if missing (uses admin client to bypass RLS)
   const { data: newProfile, error: insertError } = await adminClient
     .from("profiles")
     .insert({
@@ -34,11 +34,10 @@ export async function getUser() {
 
   if (newProfile) return newProfile;
 
-  // Last resort — log the error and sign out
   console.error("Failed to create profile:", insertError);
   await supabase.auth.signOut();
   redirect("/auth/login?error=profile_creation_failed");
-}
+});
 
 export async function requireRole(role: UserRole) {
   const profile = await getUser();
