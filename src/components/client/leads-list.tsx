@@ -183,13 +183,22 @@ export function ClientLeadsList({
     setRevealing(null);
   }
 
-  async function updateDisposition(field: string, value: unknown) {
+  // Map API field names (camelCase) to Lead interface field names (snake_case)
+  const API_TO_LEAD_FIELD: Record<string, string> = {
+    disposition: "disposition",
+    followUpDate: "follow_up_date",
+    dealValue: "deal_value",
+    leadRating: "lead_rating",
+    dispositionNote: "disposition_note",
+  };
+
+  async function updateDisposition(apiField: string, value: unknown) {
     if (!selectedLead) return;
     setSavingDisposition(true);
 
     const body: Record<string, unknown> = { leadId: selectedLead.id, clientId, disposition: selectedLead.disposition || "revealed" };
-    body[field] = value;
-    if (field === "disposition") body.disposition = value;
+    body[apiField] = value;
+    if (apiField === "disposition") body.disposition = value;
 
     const res = await fetch("/api/leads/disposition", {
       method: "POST",
@@ -198,11 +207,12 @@ export function ClientLeadsList({
     });
 
     if (res.ok) {
-      const updatedLead = { ...selectedLead, [field]: value };
-      if (field === "disposition") updatedLead.disposition = value as LeadDisposition;
+      const leadField = API_TO_LEAD_FIELD[apiField] || apiField;
+      const updatedLead = { ...selectedLead, [leadField]: value };
+      if (apiField === "disposition") updatedLead.disposition = value as LeadDisposition;
       setSelectedLead(updatedLead);
       setLeads(leads.map((l) => l.id === selectedLead.id ? updatedLead : l));
-      if (field === "disposition") loadNotes(selectedLead.id);
+      if (apiField === "disposition") loadNotes(selectedLead.id);
     }
     setSavingDisposition(false);
   }
