@@ -1,40 +1,45 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Image from "next/image";
 
 export default function AuthPage() {
-  const [mode, setMode] = useState<"loading" | "recovery" | "redirect">("loading");
+  const [showRecovery, setShowRecovery] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+  const isRecovery = useRef(false);
   const router = useRouter();
   const supabase = createClient();
 
   useEffect(() => {
     // Check URL hash for recovery tokens (implicit flow)
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const type = hashParams.get("type");
-
-    if (type === "recovery") {
-      setMode("recovery");
+    const hash = window.location.hash.substring(1);
+    if (hash) {
+      const hashParams = new URLSearchParams(hash);
+      const type = hashParams.get("type");
+      if (type === "recovery") {
+        isRecovery.current = true;
+        setShowRecovery(true);
+      }
     }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY") {
-        setMode("recovery");
-      } else if (event === "SIGNED_IN" && mode !== "recovery") {
+        isRecovery.current = true;
+        setShowRecovery(true);
+      } else if (event === "SIGNED_IN" && !isRecovery.current) {
         router.replace("/dashboard");
       }
     });
 
-    // If nothing happens after 5 seconds and not in recovery, redirect to login
+    // If nothing happens after 5 seconds and not recovery, go to login
     const timeout = setTimeout(() => {
-      if (mode === "loading") {
+      if (!isRecovery.current) {
         router.replace("/auth/login");
       }
     }, 5000);
@@ -72,7 +77,7 @@ export default function AuthPage() {
     setTimeout(() => router.push("/dashboard"), 2000);
   }
 
-  if (mode === "loading") {
+  if (!showRecovery && !success) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <p className="text-muted">Verifying...</p>
@@ -99,7 +104,6 @@ export default function AuthPage() {
     );
   }
 
-  // Recovery mode — show password reset form
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="w-full max-w-md">

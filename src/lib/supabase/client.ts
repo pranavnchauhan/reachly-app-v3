@@ -1,8 +1,12 @@
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { createClient as createSupabaseClient, SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
+let client: SupabaseClient<Database> | null = null;
+
 export function createClient() {
-  return createSupabaseClient<Database>(
+  if (client) return client;
+
+  client = createSupabaseClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -13,4 +17,6 @@ export function createClient() {
       },
     }
   );
+
+  return client;
 }
