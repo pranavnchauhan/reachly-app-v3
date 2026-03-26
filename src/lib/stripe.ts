@@ -13,10 +13,52 @@ export function getStripe(): Stripe {
   return _stripe;
 }
 
-// Credit pack tiers — price in cents (AUD)
+// Credit pack tiers — price in cents (AUD), matching reachly.com.au pricing
 export const CREDIT_PACKS = [
-  { id: "pack_10", credits: 10, price: 80_00, label: "10 Credits", perCredit: "$8.00" },
-  { id: "pack_25", credits: 25, price: 175_00, label: "25 Credits", perCredit: "$7.00", popular: true },
-  { id: "pack_50", credits: 50, price: 300_00, label: "50 Credits", perCredit: "$6.00" },
-  { id: "pack_100", credits: 100, price: 500_00, label: "100 Credits", perCredit: "$5.00", best: true },
+  {
+    id: "pilot",
+    credits: 10,
+    price: 999_00,
+    label: "The Pilot Pack",
+    description: "Test the waters with verified leads.",
+    validity: "4 Months",
+    validityNote: "Quarter + Buffer",
+    features: [
+      "10 Verified Truth Reveals",
+      "Triple-Verified Contacts",
+      "0% Bounce Guarantee",
+      "Standard Support",
+    ],
+  },
+  {
+    id: "growth",
+    credits: 20,
+    price: 1799_00,
+    label: "The Growth Engine",
+    description: "Scale your outreach with priority access.",
+    validity: "9 Months",
+    validityNote: "Multi-Quarter Strategy",
+    popular: true,
+    features: [
+      "20 Verified Truth Reveals",
+      "Priority Niche Setup",
+      "0% Bounce Guarantee",
+      "Priority Support",
+    ],
+  },
+  {
+    id: "scale",
+    credits: 50,
+    price: 3999_00,
+    label: "The Scale Accelerator",
+    description: "Enterprise-grade lead generation.",
+    validity: "14 Months",
+    validityNote: "Annual+ Peace of Mind",
+    features: [
+      "50 Verified Truth Reveals",
+      "Custom Niche Development",
+      "0% Bounce Guarantee",
+      "Dedicated Success Manager",
+    ],
+  },
 ] as const;
