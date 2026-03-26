@@ -87,16 +87,18 @@ export async function POST(request: Request) {
     }
   }
 
-  // 5. Send welcome/password reset email
+  // 5. Send welcome magic link email
   if (sendWelcome) {
-    // Use resetPasswordForEmail which actually sends the email via SMTP
     const { createClient: createServerClient } = await import("@supabase/supabase-js");
     const anonClient = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
-    await anonClient.auth.resetPasswordForEmail(email, {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth/reset-password`,
+    await anonClient.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth/callback?next=/dashboard`,
+      },
     });
   }
 
