@@ -41,11 +41,8 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth`,
-      },
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth`,
     });
 
     if (error) {
@@ -71,7 +68,7 @@ export default function LoginPage() {
             priority
           />
           <p className="text-muted mt-2">
-            {forgotMode ? "Sign in with a magic link" : "Welcome back"}
+            {forgotMode ? "Reset your password" : "Welcome back"}
           </p>
         </div>
 
@@ -84,7 +81,7 @@ export default function LoginPage() {
             </div>
             <h3 className="font-semibold mb-2">Check your email</h3>
             <p className="text-sm text-muted mb-4">
-              We sent a magic login link to <strong>{email}</strong>. Click it to sign in. Check your spam folder if you don&apos;t see it.
+              We sent a password reset link to <strong>{email}</strong>. Check your spam folder if you don&apos;t see it.
             </p>
             <button
               onClick={() => { setForgotMode(false); setForgotSent(false); }}
@@ -115,7 +112,7 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full py-2.5 bg-primary text-white rounded-lg font-medium hover:bg-primary-hover transition-colors disabled:opacity-50"
             >
-              {loading ? "Sending..." : "Send Magic Link"}
+              {loading ? "Sending..." : "Send Reset Link"}
             </button>
             <p className="text-center text-sm">
               <button type="button" onClick={() => { setForgotMode(false); setError(""); }} className="text-primary hover:underline">

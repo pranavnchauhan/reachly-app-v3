@@ -226,17 +226,14 @@ export async function POST(request: Request) {
       const { data: userData } = await supabase.auth.admin.getUserById(userId);
       if (!userData?.user?.email) return NextResponse.json({ error: "User has no email" }, { status: 400 });
 
-      // Send magic link instead of password reset
+      // Send password reset email
       const { createClient: createAnonClient } = await import("@supabase/supabase-js");
       const anonClient = createAnonClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
       );
-      const { error } = await anonClient.auth.signInWithOtp({
-        email: userData.user.email,
-        options: {
-          emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth`,
-        },
+      const { error } = await anonClient.auth.resetPasswordForEmail(userData.user.email, {
+        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth`,
       });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ success: true, email: userData.user.email });
