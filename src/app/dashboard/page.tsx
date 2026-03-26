@@ -17,10 +17,15 @@ export default async function ClientDashboard() {
 
   const nicheIds = niches?.map((n) => n.id) ?? [];
 
+  // Get user's company for company-level credits
+  const { data: profile } = await supabase.from("profiles").select("company_id").eq("id", user.id).single();
+  const companyId = profile?.company_id;
+
   const [
     { count: availableLeads },
     { count: revealedLeads },
-    { data: creditPacks },
+    { data: userPacks },
+    { data: companyPacks },
     { count: activeNiches },
   ] = await Promise.all([
     nicheIds.length
@@ -34,10 +39,14 @@ export default async function ClientDashboard() {
           .in("client_niche_id", nicheIds)
       : { count: 0 },
     supabase.from("credit_packs").select("total_credits, used_credits").eq("client_id", user.id),
+    companyId
+      ? supabase.from("credit_packs").select("total_credits, used_credits").eq("company_id", companyId)
+      : { data: [] },
     supabase.from("client_niches").select("*", { count: "exact", head: true }).eq("client_id", user.id).eq("is_active", true),
   ]);
 
-  const totalCredits = creditPacks?.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0) ?? 0;
+  const allPacks = [...(userPacks || []), ...(companyPacks || [])];
+  const totalCredits = allPacks.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0);
 
   const stats = [
     { label: "New Leads", value: availableLeads ?? 0, icon: Zap, color: "text-primary", href: "/dashboard/leads" },
