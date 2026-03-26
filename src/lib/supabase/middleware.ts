@@ -4,13 +4,6 @@ import { NextResponse, type NextRequest } from "next/server";
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
-  // If reset-password page has a code param, redirect through callback to exchange it server-side
-  const { pathname, searchParams, origin } = request.nextUrl;
-  if (pathname === "/auth/reset-password" && searchParams.has("code")) {
-    const code = searchParams.get("code")!;
-    return NextResponse.redirect(`${origin}/auth/callback?code=${code}&type=recovery`);
-  }
-
   // Skip auth checks if Supabase is not configured
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     return supabaseResponse;

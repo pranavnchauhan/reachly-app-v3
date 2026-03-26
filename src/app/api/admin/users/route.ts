@@ -235,7 +235,7 @@ export async function POST(request: Request) {
       const { error } = await anonClient.auth.signInWithOtp({
         email: userData.user.email,
         options: {
-          emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth/callback?next=/dashboard`,
+          emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth`,
         },
       });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
