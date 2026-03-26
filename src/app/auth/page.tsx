@@ -55,8 +55,8 @@ export default function AuthPage() {
     e.preventDefault();
     setError("");
 
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
+    if (password.length < 12) {
+      setError("Password must be at least 12 characters");
       return;
     }
     if (password !== confirmPassword) {
@@ -122,9 +122,9 @@ export default function AuthPage() {
             <input
               id="password" type="password" value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required minLength={8}
+              required minLength={12}
               className="w-full px-3 py-2.5 rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-              placeholder="Minimum 8 characters"
+              placeholder="Minimum 12 characters"
             />
           </div>
 
