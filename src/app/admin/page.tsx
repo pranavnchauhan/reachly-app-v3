@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   Users, Target, Zap, ClipboardList, CheckCircle2, Clock, Eye,
-  CreditCard, BarChart3, ArrowRight, Plus,
+  CreditCard, BarChart3, ArrowRight, Plus, AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 import { PipelineTrigger } from "@/components/admin/pipeline-trigger";
@@ -23,6 +23,7 @@ export default async function AdminDashboard() {
     { data: activeClientNiches },
     { data: recentLeads },
     { data: clients },
+    { data: pendingDisputes },
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "client"),
     supabase.from("client_niches").select("*", { count: "exact", head: true }).eq("is_active", true),
@@ -35,6 +36,7 @@ export default async function AdminDashboard() {
     supabase.from("client_niches").select("id, name").eq("is_active", true),
     supabase.from("leads").select("id, company_name, contact_name, contact_title, status, contact_email, discovered_at, signals_matched").order("created_at", { ascending: false }).limit(5),
     supabase.from("profiles").select("id, full_name, company_name, email, created_at").eq("role", "client").order("created_at", { ascending: false }).limit(5),
+    supabase.from("disputes").select("id, reason, status, created_at, leads(company_name, contact_name), profiles!disputes_client_id_fkey(full_name)").eq("status", "pending").order("created_at", { ascending: false }).limit(10),
   ]);
 
   const approvalRate = (totalLeads ?? 0) > 0 ? Math.round(((validatedLeads ?? 0) + (publishedLeads ?? 0) + (revealedLeads ?? 0)) / (totalLeads ?? 1) * 100) : 0;
@@ -48,6 +50,28 @@ export default async function AdminDashboard() {
           <p className="text-sm text-muted">Pipeline health, clients & lead generation</p>
         </div>
       </div>
+
+      {/* Pending Disputes Banner */}
+      {pendingDisputes && pendingDisputes.length > 0 && (
+        <Link href="/admin/disputes"
+          className="flex items-start gap-4 bg-warning/5 border border-warning/30 rounded-xl p-5 hover:bg-warning/10 transition-colors">
+          <div className="w-10 h-10 rounded-xl bg-warning/10 flex items-center justify-center flex-shrink-0">
+            <AlertTriangle className="w-5 h-5 text-warning" />
+          </div>
+          <div className="flex-1">
+            <p className="font-semibold text-sm">{pendingDisputes.length} dispute{pendingDisputes.length > 1 ? "s" : ""} pending review</p>
+            <div className="mt-1 space-y-0.5">
+              {pendingDisputes.slice(0, 3).map((d) => (
+                <p key={d.id} className="text-xs text-muted">
+                  {(d.leads as unknown as { company_name: string })?.company_name} — filed by {(d.profiles as unknown as { full_name: string })?.full_name}
+                </p>
+              ))}
+              {pendingDisputes.length > 3 && <p className="text-xs text-muted">+{pendingDisputes.length - 3} more</p>}
+            </div>
+          </div>
+          <ArrowRight className="w-5 h-5 text-warning flex-shrink-0 mt-1" />
+        </Link>
+      )}
 
       {/* Quick Nav */}
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
