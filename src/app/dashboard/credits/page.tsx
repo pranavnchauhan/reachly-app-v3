@@ -1,8 +1,8 @@
 export const dynamic = "force-dynamic";
 
-import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth";
-import { CreditCard, ArrowDownCircle, ArrowUpCircle, RotateCcw, Clock, AlertTriangle, ShoppingCart } from "lucide-react";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { CreditCard, ArrowDownCircle, ArrowUpCircle, RotateCcw, Clock, AlertTriangle, ShoppingCart, Zap } from "lucide-react";
 import Link from "next/link";
 
 function daysUntil(date: string): number {
@@ -29,7 +29,7 @@ export default async function CreditsPage({
 }) {
   const { purchased } = await searchParams;
   const user = await getUser();
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   // Get user's company for company-level credits
   const { data: profile } = await supabase.from("profiles").select("company_id").eq("id", user.id).single();
@@ -37,11 +37,11 @@ export default async function CreditsPage({
 
   // Fetch user-level packs/transactions
   const [{ data: userPacks }, { data: userTx }] = await Promise.all([
-    supabase.from("credit_packs").select("*").eq("client_id", user.id).is("company_id", null).order("purchased_at", { ascending: false }),
-    supabase.from("credit_transactions").select("*").eq("client_id", user.id).is("company_id", null).order("created_at", { ascending: false }).limit(50),
+    supabase.from("credit_packs").select("*").eq("client_id", user.id).order("purchased_at", { ascending: false }),
+    supabase.from("credit_transactions").select("*").eq("client_id", user.id).order("created_at", { ascending: false }).limit(50),
   ]);
 
-  // Fetch company-level packs/transactions if user belongs to a company
+  // Fetch company-level packs/transactions
   let companyPacks: typeof userPacks = [];
   let companyTx: typeof userTx = [];
   if (companyId) {
@@ -63,6 +63,7 @@ export default async function CreditsPage({
   const expiredPacks = packs.filter((p) => isExpired(p.expires_at) && p.total_credits - p.used_credits > 0);
 
   const totalCredits = activePacks.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0);
+  const totalPurchased = packs.reduce((sum, p) => sum + p.total_credits, 0);
   const totalUsed = packs.reduce((sum, p) => sum + p.used_credits, 0);
   const expiredCredits = expiredPacks.reduce((sum, p) => sum + (p.total_credits - p.used_credits), 0);
 
@@ -76,141 +77,176 @@ export default async function CreditsPage({
   const daysToExpiry = earliestExpiry ? daysUntil(earliestExpiry) : null;
 
   return (
-    <div>
+    <div className="max-w-4xl">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Credits</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Credits</h1>
+          <p className="text-sm text-muted mt-0.5">Manage your lead reveal credits</p>
+        </div>
         <Link
           href="/dashboard/buy-credits"
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors"
+          className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors"
         >
           <ShoppingCart className="w-4 h-4" /> Buy Credits
         </Link>
       </div>
 
+      {/* Purchase success */}
       {purchased && (
-        <div className="bg-success/10 border border-success/20 text-success rounded-xl p-4 mb-6 flex items-center gap-3">
-          <ArrowDownCircle className="w-5 h-5 flex-shrink-0" />
-          <p className="text-sm font-medium">
-            {purchased} credits purchased successfully! They&apos;re ready to use.
-          </p>
+        <div className="bg-success/10 border border-success/20 text-success rounded-2xl p-4 mb-6 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center flex-shrink-0">
+            <ArrowDownCircle className="w-5 h-5" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">{purchased} credits added!</p>
+            <p className="text-sm opacity-80">Ready to use for revealing leads.</p>
+          </div>
         </div>
       )}
 
       {/* Expiry warning */}
       {daysToExpiry !== null && daysToExpiry <= 14 && daysToExpiry > 0 && (
-        <div className="bg-warning/10 border border-warning/20 text-warning rounded-xl p-4 mb-6 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold">Credits expiring soon</p>
-            <p className="text-sm mt-0.5">
-              You have credits expiring in {daysToExpiry} days ({earliestExpiry ? formatDate(earliestExpiry) : ""}).
-              Purchase a new pack to roll over your remaining balance.
-            </p>
-            <Link href="/dashboard/buy-credits" className="inline-flex items-center gap-1.5 mt-2 text-sm font-medium underline underline-offset-2">
-              <ShoppingCart className="w-3.5 h-3.5" /> Top up now
-            </Link>
+        <div className="bg-warning/5 border border-warning/20 rounded-2xl p-4 mb-6 flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-warning/10 flex items-center justify-center flex-shrink-0">
+            <AlertTriangle className="w-5 h-5 text-warning" />
           </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold">Credits expiring in {daysToExpiry} days</p>
+            <p className="text-sm text-muted mt-0.5">
+              Purchase a new pack before {formatDate(earliestExpiry!)} to roll over your remaining balance automatically.
+            </p>
+          </div>
+          <Link href="/dashboard/buy-credits" className="flex items-center gap-2 px-4 py-2 bg-warning text-white rounded-xl text-sm font-medium hover:bg-warning/90 transition-colors flex-shrink-0">
+            Top Up
+          </Link>
         </div>
       )}
 
       {/* Expired credits notice */}
       {expiredCredits > 0 && (
-        <div className="bg-danger/10 border border-danger/20 text-danger rounded-xl p-4 mb-6 flex items-start gap-3">
-          <Clock className="w-5 h-5 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold">{expiredCredits} credits have expired</p>
-            <p className="text-sm mt-0.5">
-              Purchase a new pack and these will be rolled over automatically.
-            </p>
-            <Link href="/dashboard/buy-credits" className="inline-flex items-center gap-1.5 mt-2 text-sm font-medium underline underline-offset-2">
-              <ShoppingCart className="w-3.5 h-3.5" /> Renew & roll over
-            </Link>
+        <div className="bg-danger/5 border border-danger/20 rounded-2xl p-4 mb-6 flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-danger/10 flex items-center justify-center flex-shrink-0">
+            <Clock className="w-5 h-5 text-danger" />
           </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-danger">{expiredCredits} credits have expired</p>
+            <p className="text-sm text-muted mt-0.5">
+              Purchase a new pack and these will be rolled over automatically into your new balance.
+            </p>
+          </div>
+          <Link href="/dashboard/buy-credits" className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors flex-shrink-0">
+            Renew
+          </Link>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="flex items-center gap-3 mb-2">
-            <CreditCard className="w-5 h-5 text-primary" />
-            <span className="text-sm text-muted">Available</span>
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-4 mb-8">
+        <div className="bg-card border border-border rounded-2xl p-5">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+              <Zap className="w-5 h-5 text-primary" />
+            </div>
           </div>
           <p className="text-3xl font-bold">{totalCredits}</p>
+          <p className="text-sm text-muted mt-0.5">Available</p>
           {earliestExpiry && totalCredits > 0 && (
-            <p className="text-xs text-muted mt-1">
-              Earliest expiry: {formatDate(earliestExpiry)}
+            <p className="text-xs text-muted/70 mt-2 flex items-center gap-1">
+              <Clock className="w-3 h-3" /> Expires {formatDate(earliestExpiry)}
             </p>
           )}
         </div>
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="flex items-center gap-3 mb-2">
-            <ArrowDownCircle className="w-5 h-5 text-success" />
-            <span className="text-sm text-muted">Total Purchased</span>
+        <div className="bg-card border border-border rounded-2xl p-5">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-success/10 flex items-center justify-center">
+              <ArrowDownCircle className="w-5 h-5 text-success" />
+            </div>
           </div>
-          <p className="text-3xl font-bold">{packs.reduce((sum, p) => sum + p.total_credits, 0)}</p>
+          <p className="text-3xl font-bold">{totalPurchased}</p>
+          <p className="text-sm text-muted mt-0.5">Total Purchased</p>
         </div>
-        <div className="bg-card border border-border rounded-xl p-5">
-          <div className="flex items-center gap-3 mb-2">
-            <ArrowUpCircle className="w-5 h-5 text-warning" />
-            <span className="text-sm text-muted">Used</span>
+        <div className="bg-card border border-border rounded-2xl p-5">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-warning/10 flex items-center justify-center">
+              <ArrowUpCircle className="w-5 h-5 text-warning" />
+            </div>
           </div>
           <p className="text-3xl font-bold">{totalUsed}</p>
+          <p className="text-sm text-muted mt-0.5">Used</p>
         </div>
       </div>
 
       {/* Credit Packs */}
-      <h2 className="text-lg font-semibold mb-3">Credit Packs</h2>
+      <h2 className="text-sm font-semibold text-muted uppercase tracking-wider mb-3">Credit Packs</h2>
       {!packs?.length ? (
-        <div className="bg-card border border-border rounded-xl p-8 text-center mb-8">
-          <p className="text-muted">No credit packs yet.</p>
-          <Link href="/dashboard/buy-credits" className="text-primary hover:underline text-sm mt-2 inline-block">
-            Purchase your first pack
+        <div className="bg-card border border-border rounded-2xl p-8 text-center mb-8">
+          <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+            <CreditCard className="w-7 h-7 text-primary" />
+          </div>
+          <p className="font-semibold mb-1">No credit packs yet</p>
+          <p className="text-sm text-muted mb-4">Purchase a pack to start revealing triple-verified leads.</p>
+          <Link href="/dashboard/buy-credits" className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors">
+            <ShoppingCart className="w-4 h-4" /> Get Started
           </Link>
         </div>
       ) : (
-        <div className="grid gap-3 mb-8">
+        <div className="space-y-3 mb-8">
           {packs.map((pack) => {
             const remaining = pack.total_credits - pack.used_credits;
             const expired = isExpired(pack.expires_at);
             const expiringSoon = pack.expires_at && !expired && daysUntil(pack.expires_at) <= 14;
+            const pct = pack.total_credits > 0 ? (remaining / pack.total_credits) * 100 : 0;
 
             return (
               <div
                 key={pack.id}
-                className={`bg-card border rounded-xl p-4 flex items-center justify-between ${
-                  expired ? "border-danger/30 opacity-60" : expiringSoon ? "border-warning/50" : "border-border"
+                className={`bg-card border rounded-2xl p-5 ${
+                  expired ? "border-danger/30 opacity-60" : expiringSoon ? "border-warning/40" : "border-border"
                 }`}
               >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium">{pack.total_credits} credits</p>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <p className="font-semibold">{pack.total_credits} credits</p>
                     {expired && remaining > 0 && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-danger/10 text-danger font-medium">Expired</span>
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-danger/10 text-danger font-medium">Expired</span>
                     )}
                     {expiringSoon && remaining > 0 && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-warning/10 text-warning font-medium">
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-warning/10 text-warning font-medium">
                         Expires in {daysUntil(pack.expires_at!)}d
                       </span>
                     )}
                     {remaining === 0 && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-muted/10 text-muted font-medium">Fully used</span>
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-muted/10 text-muted font-medium">Fully used</span>
+                    )}
+                    {!expired && remaining > 0 && !expiringSoon && pack.expires_at && (
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-success/10 text-success font-medium">Active</span>
+                    )}
+                    {!pack.expires_at && remaining > 0 && (
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary font-medium">No expiry</span>
                     )}
                   </div>
-                  <p className="text-sm text-muted">
-                    Purchased {formatDate(pack.purchased_at)}
-                    {pack.expires_at && (
-                      <> · {expired ? "Expired" : "Expires"} {formatDate(pack.expires_at)}</>
-                    )}
-                  </p>
+                  <p className="font-bold text-lg">{remaining} <span className="text-sm font-normal text-muted">remaining</span></p>
                 </div>
-                <div className="text-right">
-                  <p className="font-semibold">{remaining} remaining</p>
-                  <div className="w-24 h-1.5 bg-border rounded-full mt-1">
-                    <div
-                      className={`h-full rounded-full ${expired ? "bg-danger" : expiringSoon ? "bg-warning" : "bg-primary"}`}
-                      style={{ width: `${pack.total_credits > 0 ? (remaining / pack.total_credits) * 100 : 0}%` }}
-                    />
-                  </div>
+
+                {/* Progress bar */}
+                <div className="w-full h-2 bg-border rounded-full mb-3">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      expired ? "bg-danger" : expiringSoon ? "bg-warning" : "bg-primary"
+                    }`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-sm text-muted">
+                  <span>Purchased {formatDate(pack.purchased_at)}</span>
+                  {pack.expires_at && (
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5" />
+                      {expired ? "Expired" : "Expires"} {formatDate(pack.expires_at)}
+                    </span>
+                  )}
                 </div>
               </div>
             );
@@ -219,28 +255,28 @@ export default async function CreditsPage({
       )}
 
       {/* Transaction History */}
-      <h2 className="text-lg font-semibold mb-3">Transaction History</h2>
+      <h2 className="text-sm font-semibold text-muted uppercase tracking-wider mb-3">Transaction History</h2>
       {!transactions?.length ? (
-        <div className="bg-card border border-border rounded-xl p-8 text-center">
+        <div className="bg-card border border-border rounded-2xl p-8 text-center">
           <p className="text-muted">No transactions yet.</p>
         </div>
       ) : (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="bg-card border border-border rounded-2xl overflow-hidden">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border text-left">
-                <th className="px-4 py-3 text-sm font-medium text-muted">Date</th>
-                <th className="px-4 py-3 text-sm font-medium text-muted">Type</th>
-                <th className="px-4 py-3 text-sm font-medium text-muted">Amount</th>
-                <th className="px-4 py-3 text-sm font-medium text-muted">Description</th>
+                <th className="px-5 py-3.5 text-xs font-semibold text-muted uppercase tracking-wider">Date</th>
+                <th className="px-5 py-3.5 text-xs font-semibold text-muted uppercase tracking-wider">Type</th>
+                <th className="px-5 py-3.5 text-xs font-semibold text-muted uppercase tracking-wider">Amount</th>
+                <th className="px-5 py-3.5 text-xs font-semibold text-muted uppercase tracking-wider">Description</th>
               </tr>
             </thead>
             <tbody>
               {transactions.map((tx) => (
-                <tr key={tx.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 text-sm">{formatDate(tx.created_at)}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
+                <tr key={tx.id} className="border-b border-border/50 last:border-0 hover:bg-background/50 transition-colors">
+                  <td className="px-5 py-3.5 text-sm">{formatDate(tx.created_at)}</td>
+                  <td className="px-5 py-3.5">
+                    <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${
                       tx.type === "purchase" ? "bg-success/10 text-success" :
                       tx.type === "refund" ? "bg-accent/10 text-accent" :
                       "bg-warning/10 text-warning"
@@ -248,13 +284,15 @@ export default async function CreditsPage({
                       {tx.type === "purchase" ? <ArrowDownCircle className="w-3 h-3" /> :
                        tx.type === "refund" ? <RotateCcw className="w-3 h-3" /> :
                        <ArrowUpCircle className="w-3 h-3" />}
-                      {tx.type}
+                      {tx.type.charAt(0).toUpperCase() + tx.type.slice(1)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm font-medium">
-                    {tx.type === "debit" ? "-" : "+"}{tx.amount}
+                  <td className="px-5 py-3.5 text-sm font-semibold">
+                    <span className={tx.type === "debit" ? "text-warning" : "text-success"}>
+                      {tx.type === "debit" ? "-" : "+"}{tx.amount}
+                    </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-muted">{tx.description}</td>
+                  <td className="px-5 py-3.5 text-sm text-muted">{tx.description}</td>
                 </tr>
               ))}
             </tbody>
