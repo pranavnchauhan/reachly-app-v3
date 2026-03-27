@@ -27,13 +27,12 @@ export async function discoverSignals(
   const allDiscovered: DiscoveredCompany[] = [];
   const geoStr = geography.length > 0 ? geography.join(", ") : "Australia";
 
-  // Process each signal — 1 Perplexity call per signal
-  for (const signal of signals) {
-    const companies = await searchNewsForSignal(signal, geoStr, apiKey);
+  // Process all signals in parallel — much faster than sequential
+  const results = await Promise.all(
+    signals.map((signal) => searchNewsForSignal(signal, geoStr, apiKey))
+  );
+  for (const companies of results) {
     allDiscovered.push(...companies);
-
-    // Brief pause between calls
-    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
   // Deduplicate by company name (keep highest confidence)

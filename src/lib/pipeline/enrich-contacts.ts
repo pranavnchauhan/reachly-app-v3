@@ -27,15 +27,16 @@ export async function enrichContacts(
 
   const enriched: EnrichedLead[] = [];
 
-  for (let i = 0; i < signalResults.length; i += 3) {
-    const batch = signalResults.slice(i, i + 3);
+  // Process in batches of 5 (up from 3) with shorter pause
+  for (let i = 0; i < signalResults.length; i += 5) {
+    const batch = signalResults.slice(i, i + 5);
     const batchResults = await Promise.all(
       batch.map((result) => findAndEnrichContact(result, apiKey))
     );
     enriched.push(...(batchResults.filter(Boolean) as EnrichedLead[]));
 
-    if (i + 3 < signalResults.length) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    if (i + 5 < signalResults.length) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
   }
 

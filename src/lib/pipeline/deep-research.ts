@@ -15,34 +15,32 @@ export async function deepResearch(
   leads: EnrichedLead[],
   nicheDescription: string
 ): Promise<ResearchedLead[]> {
-  const results: ResearchedLead[] = [];
+  // Process all leads in parallel — each does Perplexity + Claude
+  const results = await Promise.all(
+    leads.map(async (lead): Promise<ResearchedLead> => {
+      try {
+        const contactSummary = await getContactBackground(lead);
+        const analysis = await generateAnalysis(lead, contactSummary, nicheDescription);
 
-  for (const lead of leads) {
-    try {
-      const contactSummary = await getContactBackground(lead);
-      const analysis = await generateAnalysis(lead, contactSummary, nicheDescription);
-
-      results.push({
-        ...lead,
-        justification: analysis.justification || "Signal-matched lead",
-        contact_summary: contactSummary,
-        approach_strategies: analysis.strategies,
-        email_templates: analysis.emails,
-      });
-
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    } catch (error) {
-      console.error(`Deep research failed for ${lead.company.name}:`, error);
-      // Still add the lead with minimal data
-      results.push({
-        ...lead,
-        justification: "Signal-matched lead (research pending)",
-        contact_summary: "",
-        approach_strategies: [],
-        email_templates: [],
-      });
-    }
-  }
+        return {
+          ...lead,
+          justification: analysis.justification || "Signal-matched lead",
+          contact_summary: contactSummary,
+          approach_strategies: analysis.strategies,
+          email_templates: analysis.emails,
+        };
+      } catch (error) {
+        console.error(`Deep research failed for ${lead.company.name}:`, error);
+        return {
+          ...lead,
+          justification: "Signal-matched lead (research pending)",
+          contact_summary: "",
+          approach_strategies: [],
+          email_templates: [],
+        };
+      }
+    })
+  );
 
   return results;
 }
