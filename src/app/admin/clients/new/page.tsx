@@ -18,6 +18,9 @@ export default function NewClientPage() {
   const [abnLoading, setAbnLoading] = useState(false);
   const [abnVerified, setAbnVerified] = useState(false);
   const [abnError, setAbnError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<{ abn: string; name: string; state: string; postcode: string; name_type: string }[]>([]);
+  const [searching, setSearching] = useState(false);
 
   // Company fields
   const [companyName, setCompanyName] = useState("");
@@ -33,6 +36,43 @@ export default function NewClientPage() {
   const [notes, setNotes] = useState("");
 
   const [createdId, setCreatedId] = useState("");
+
+  async function searchByName() {
+    if (searchQuery.trim().length < 2) return;
+    setSearching(true);
+    setAbnError("");
+    setSearchResults([]);
+
+    const res = await fetch(`/api/admin/abn-lookup?name=${encodeURIComponent(searchQuery.trim())}`);
+    const data = await res.json();
+
+    if (res.ok && data.results?.length > 0) {
+      setSearchResults(data.results);
+    } else {
+      setAbnError(data.error || "No results found");
+    }
+    setSearching(false);
+  }
+
+  async function selectSearchResult(result: { abn: string; name: string; state: string; postcode: string }) {
+    setAbn(result.abn);
+    setSearchResults([]);
+    setSearchQuery("");
+
+    // Now do a full ABN lookup to get all details
+    setAbnLoading(true);
+    const res = await fetch(`/api/admin/abn-lookup?abn=${result.abn}`);
+    const data = await res.json();
+
+    if (res.ok) {
+      setCompanyName(data.company_name || result.name);
+      setBusinessNames(data.business_names || []);
+      setState(data.state || result.state);
+      setPostcode(data.postcode || result.postcode);
+      setAbnVerified(true);
+    }
+    setAbnLoading(false);
+  }
 
   async function lookupAbn() {
     const cleanAbn = abn.replace(/\s/g, "");
@@ -148,24 +188,63 @@ export default function NewClientPage() {
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && <div className="bg-danger/10 text-danger text-sm rounded-lg p-3">{error}</div>}
 
-        {/* ABN Lookup */}
+        {/* ABN / Company Search */}
         <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-5 shadow-sm">
           <div className="flex items-center gap-2 mb-4">
             <Search className="w-4 h-4 text-primary" />
-            <h2 className="font-semibold">ABN Lookup</h2>
-            <span className="text-xs text-muted">(auto-fills company details)</span>
+            <h2 className="font-semibold">Find Company</h2>
+            <span className="text-xs text-muted">(search by name or ABN)</span>
           </div>
-          <div className="flex gap-2">
-            <input value={abn} onChange={(e) => { setAbn(e.target.value); setAbnVerified(false); setAbnError(""); }}
-              className="flex-1 px-3 py-2.5 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary font-mono"
-              placeholder="e.g. 12 345 678 901"
-              maxLength={14} />
-            <button type="button" onClick={lookupAbn} disabled={abnLoading}
-              className="px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50 flex items-center gap-1.5">
-              {abnLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-              Lookup
-            </button>
+
+          {/* Search by company name */}
+          <div className="mb-3">
+            <label className="text-xs text-muted uppercase tracking-wide block mb-1">Company Name</label>
+            <div className="flex gap-2">
+              <input value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setAbnError(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); searchByName(); } }}
+                className="flex-1 px-3 py-2.5 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="e.g. Seamless Property" />
+              <button type="button" onClick={searchByName} disabled={searching || searchQuery.trim().length < 2}
+                className="px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50 flex items-center gap-1.5">
+                {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                Search
+              </button>
+            </div>
           </div>
+
+          {/* Search results dropdown */}
+          {searchResults.length > 0 && (
+            <div className="border border-border rounded-lg overflow-hidden mb-3 max-h-60 overflow-y-auto">
+              {searchResults.map((result, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => selectSearchResult(result)}
+                  className="w-full text-left px-4 py-3 hover:bg-primary/5 transition-colors border-b border-border/50 last:border-0"
+                >
+                  <p className="text-sm font-medium">{result.name}</p>
+                  <p className="text-xs text-muted">ABN: {result.abn} · {result.state} {result.postcode} · {result.name_type}</p>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Or search by ABN directly */}
+          <div>
+            <label className="text-xs text-muted uppercase tracking-wide block mb-1">Or enter ABN directly</label>
+            <div className="flex gap-2">
+              <input value={abn} onChange={(e) => { setAbn(e.target.value); setAbnVerified(false); setAbnError(""); }}
+                className="flex-1 px-3 py-2.5 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+                placeholder="e.g. 12 345 678 901"
+                maxLength={14} />
+              <button type="button" onClick={lookupAbn} disabled={abnLoading}
+                className="px-4 py-2.5 border border-border rounded-lg text-sm font-medium hover:bg-background transition-colors disabled:opacity-50 flex items-center gap-1.5">
+                {abnLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                Lookup
+              </button>
+            </div>
+          </div>
+
           {abnError && <p className="text-xs text-danger mt-2">{abnError}</p>}
           {abnVerified && <p className="text-xs text-success mt-2 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> ABN verified — details populated below</p>}
         </div>
