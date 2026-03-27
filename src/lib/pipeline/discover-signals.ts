@@ -34,13 +34,9 @@ export async function discoverSignals(
   const allDiscovered: DiscoveredCompany[] = [];
   const geoStr = geography.length > 0 ? geography.join(", ") : "Australia";
 
-  const sizeHint = options.employeeMin || options.employeeMax
-    ? `Target company size: ${options.employeeMin || 1}–${options.employeeMax || 10000} employees.`
-    : "";
-
   // Process all signals in parallel — much faster than sequential
   const results = await Promise.all(
-    signals.map((signal) => searchNewsForSignal(signal, geoStr, apiKey, sizeHint))
+    signals.map((signal) => searchNewsForSignal(signal, geoStr, apiKey))
   );
   for (const companies of results) {
     allDiscovered.push(...companies);
@@ -68,18 +64,15 @@ export async function discoverSignals(
 async function searchNewsForSignal(
   signal: Signal,
   geography: string,
-  apiKey: string,
-  sizeHint: string = ""
+  apiKey: string
 ): Promise<DiscoveredCompany[]> {
-  const sizeRule = sizeHint
-    ? `\n- ${sizeHint} Do NOT include large enterprises (ASX200, Fortune 500), government departments, or universities. Focus on small-to-mid-market and founder-led businesses.`
-    : "";
-
   const prompt = `Search for companies with significant presence in ${geography} that are currently showing this buying signal:
 
 "${signal.name}" — ${signal.description}
 
 Find REAL companies from the last 60 days based on verified news articles, press releases, business publications (e.g. AFR, SMH, The Australian, ABC News, industry publications).
+
+Prefer mid-market companies and founder-led businesses over mega-corps, but include any company with a genuine signal.
 
 For each company found, provide:
 - Company name
@@ -93,9 +86,8 @@ CRITICAL RULES:
 - Do NOT include overseas companies that merely do business with ${geography} — they must have a physical presence (office, team, operations) there
 - Only cite real, verifiable news sources — no blogs, recruitment sites, or generic articles
 - Only include companies where something SPECIFIC and RECENT happened
-- Include the company's Australian office location if they are a global company${sizeRule}
-- Do NOT include universities, TAFEs, schools, government agencies, councils, or departments
-- Do NOT include ASX200 companies (e.g. BHP, CBA, NAB, ANZ, Westpac, Telstra, Woolworths, Wesfarmers, CSL, Macquarie)
+- Include the company's Australian office location if they are a global company
+- Do NOT include universities, TAFEs, schools, or government agencies
 
 Respond in this exact JSON format:
 {
