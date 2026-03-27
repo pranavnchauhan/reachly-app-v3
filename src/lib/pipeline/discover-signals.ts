@@ -61,32 +61,59 @@ export async function discoverSignals(
     .slice(0, 20); // Cap at 20 companies
 }
 
+// Map internal signal names to news-searchable descriptions
+// Internal descriptions like "Complex workflows with many touchpoints" don't appear in news
+// We need observable events that journalists actually report on
+const NEWS_SEARCH_HINTS: Record<string, string> = {
+  "Long Lead Times": "company facing supply chain delays, shipping disruptions, production backlogs, or delivery delays",
+  "Rapid Growth": "company announcing rapid revenue growth, new funding round, expanding headcount, or opening new offices",
+  "Business Acquisition / Merger": "company completing acquisition, merger, or being acquired by another company",
+  "Hiring Operations Roles": "company hiring COO, operations manager, head of operations, or process improvement roles",
+  "Multiple Handoffs": "company restructuring operations, consolidating teams, or streamlining workflows",
+  "Process Complaints": "company receiving customer complaints about service quality, delays, or operational failures",
+  "Systems Integration Issues": "company migrating systems, replacing legacy software, or integrating after acquisition",
+  "Customer Experience Failures": "company facing public customer complaints, service outages, or negative reviews in news",
+  "Scaling Beyond Systems": "fast-growing company struggling with operational capacity or systems not keeping up with growth",
+  "Negative Employee Reviews": "company facing employee complaints, workplace issues, or culture problems reported in media",
+  "CRM/System Issues": "company implementing new CRM, ERP, or business systems, or reporting technology challenges",
+  "Multi-Location Expansion": "company opening new branches, offices, stores, or expanding to new cities or regions",
+  "Leadership Gaps": "company appointing new CEO, COO, or GM, or reporting leadership changes or vacancies",
+  "Compliance & Regulatory Pressure": "company facing regulatory changes, compliance requirements, or industry regulation updates",
+  "Founder/Team Burnout": "founder-led company discussing growth challenges, work-life balance, or operational overwhelm",
+  "New Product/Market Launches": "company launching new product, entering new market, or expanding service offerings",
+  "No COO/Ops Leader": "growing company without a COO or operations leader, founder still running day-to-day operations",
+  "Founder Still in Operations": "founder-led company where founder is still involved in daily operations instead of strategy",
+  "Manual/Paper-Based Processes": "company digitizing operations, moving from manual to digital processes, or adopting new technology",
+  "High Staff Turnover": "company experiencing high employee turnover, retention issues, or hiring difficulties",
+  "Failed Tech Implementation": "company reporting failed software rollout, IT project delays, or technology migration issues",
+  "Revenue Growth + Flat Margins": "company growing revenue but reporting flat or declining profit margins",
+};
+
 async function searchNewsForSignal(
   signal: Signal,
   geography: string,
   apiKey: string
 ): Promise<DiscoveredCompany[]> {
-  const prompt = `Search for companies with significant presence in ${geography} that are currently showing this buying signal:
+  // Use news-searchable description if available, otherwise fall back to signal description
+  const searchDescription = NEWS_SEARCH_HINTS[signal.name] || signal.description;
 
-"${signal.name}" — ${signal.description}
+  const prompt = `Find Australian companies that have recently been in the news for: ${searchDescription}
 
-Find REAL companies from the last 60 days based on verified news articles, press releases, business publications (e.g. AFR, SMH, The Australian, ABC News, industry publications).
+Search verified news articles, press releases, and business publications from the last 60 days (e.g. AFR, SMH, The Australian, ABC News, SmartCompany, Business News Australia, industry publications).
 
-Prefer mid-market companies and founder-led businesses over mega-corps, but include any company with a genuine signal.
+Prefer mid-market companies and founder-led businesses, but include any company with a genuine, recent event.
 
 For each company found, provide:
 - Company name
 - Their website domain (if known)
 - The specific event or evidence from the news
 - The source URL where you found this
-- How confident you are this signal applies (0.0 to 1.0)
+- How confident you are (0.0 to 1.0)
 
-CRITICAL RULES:
-- Only include companies that are HEADQUARTERED in ${geography} OR have a major office/operations in ${geography}
-- Do NOT include overseas companies that merely do business with ${geography} — they must have a physical presence (office, team, operations) there
-- Only cite real, verifiable news sources — no blogs, recruitment sites, or generic articles
+RULES:
+- Companies must be headquartered in ${geography} or have major operations there
+- Only cite real, verifiable news — no blogs or generic articles
 - Only include companies where something SPECIFIC and RECENT happened
-- Include the company's Australian office location if they are a global company
 - Do NOT include universities, TAFEs, schools, or government agencies
 
 Respond in this exact JSON format:
