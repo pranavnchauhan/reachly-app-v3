@@ -226,16 +226,36 @@ export async function POST(request: Request) {
       const { data: userData } = await supabase.auth.admin.getUserById(userId);
       if (!userData?.user?.email) return NextResponse.json({ error: "User has no email" }, { status: 400 });
 
-      // Send password reset email
-      const { createClient: createAnonClient } = await import("@supabase/supabase-js");
-      const anonClient = createAnonClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-      const { error } = await anonClient.auth.resetPasswordForEmail(userData.user.email, {
-        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth`,
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au";
+      const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+        type: "magiclink",
+        email: userData.user.email,
+        options: { redirectTo: `${appUrl}/auth` },
       });
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+      if (linkError) return NextResponse.json({ error: linkError.message }, { status: 500 });
+
+      if (linkData?.properties?.action_link) {
+        const { sendEmail } = await import("@/lib/email");
+        await sendEmail({
+          to: userData.user.email,
+          subject: "Sign in to Reachly",
+          body: `
+            <h2 style="color:#111;font-size:20px;margin:0 0 8px;">Sign in to Reachly</h2>
+            <p style="color:#555;font-size:15px;line-height:1.6;">
+              Click the button below to sign in. Once signed in, you can set a new password from settings.
+            </p>
+            <div style="margin:24px 0;">
+              <a href="${linkData.properties.action_link}"
+                 style="display:inline-block;background:#16a34a;color:#fff;padding:14px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;">
+                Sign In
+              </a>
+            </div>
+            <p style="color:#999;font-size:13px;">This link expires in 24 hours.</p>
+          `,
+        });
+      }
+
       return NextResponse.json({ success: true, email: userData.user.email });
     }
 

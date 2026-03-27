@@ -87,16 +87,40 @@ export async function POST(request: Request) {
     }
   }
 
-  // 5. Send welcome/password reset email
+  // 5. Send welcome email with magic link
   if (sendWelcome) {
-    const { createClient: createAnonClient } = await import("@supabase/supabase-js");
-    const anonClient = createAnonClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-    await anonClient.auth.resetPasswordForEmail(email, {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au"}/auth`,
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au";
+
+    // Generate a magic link using admin API — no PKCE needed
+    const { data: linkData } = await supabase.auth.admin.generateLink({
+      type: "magiclink",
+      email,
+      options: { redirectTo: `${appUrl}/auth` },
     });
+
+    if (linkData?.properties?.action_link) {
+      // Send branded welcome email with the magic link
+      const { sendEmail } = await import("@/lib/email");
+      const firstName = fullName.split(" ")[0];
+      await sendEmail({
+        to: email,
+        toName: fullName,
+        subject: "Welcome to Reachly — Your account is ready",
+        body: `
+          <h2 style="color:#111;font-size:20px;margin:0 0 8px;">Welcome to Reachly, ${firstName}!</h2>
+          <p style="color:#555;font-size:15px;line-height:1.6;">
+            Your account has been created. Click the button below to sign in and set your password.
+          </p>
+          <div style="margin:24px 0;">
+            <a href="${linkData.properties.action_link}"
+               style="display:inline-block;background:#16a34a;color:#fff;padding:14px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;">
+              Sign In to Reachly
+            </a>
+          </div>
+          <p style="color:#999;font-size:13px;">This link expires in 24 hours. If it expires, use "Forgot password" on the login page to get a new one.</p>
+        `,
+      });
+    }
   }
 
   return NextResponse.json({
