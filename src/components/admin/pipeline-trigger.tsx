@@ -50,6 +50,30 @@ const STEP_LABELS: Record<string, string> = {
   done: "Pipeline complete!",
 };
 
+const STORAGE_KEY = "reachly_pipeline_run";
+
+function saveRunToStorage(runId: string) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ runId, startedAt: Date.now() })); } catch {}
+}
+
+function getRunFromStorage(): string | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const { runId, startedAt } = JSON.parse(raw);
+    // Expire after 10 minutes
+    if (Date.now() - startedAt > 10 * 60 * 1000) {
+      localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return runId;
+  } catch { return null; }
+}
+
+function clearRunFromStorage() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch {}
+}
+
 export function PipelineTrigger({ niches }: { niches: Niche[] }) {
   const [selectedNiche, setSelectedNiche] = useState<string>("all");
   const [running, setRunning] = useState(false);
@@ -65,10 +89,6 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
     }
   }, []);
 
-  useEffect(() => {
-    return () => stopPolling();
-  }, [stopPolling]);
-
   const pollStatus = useCallback(async (runId: string, token: string) => {
     try {
       const res = await fetch(`/api/pipeline/status/${runId}`, {
@@ -82,6 +102,7 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
       if (data.status === "completed" || data.status === "failed") {
         stopPolling();
         setRunning(false);
+        clearRunFromStorage();
         if (data.status === "completed") {
           const totalLeads = data.result?.results?.reduce((sum, r) => sum + (r.leads || 0), 0) ?? 0;
           if (totalLeads > 0) {
@@ -93,6 +114,31 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
       // Ignore poll errors — will retry
     }
   }, [stopPolling]);
+
+  function startPolling(runId: string, token: string) {
+    stopPolling();
+    pollRef.current = setInterval(() => pollStatus(runId, token), 3000);
+    // Also poll immediately
+    pollStatus(runId, token);
+  }
+
+  // On mount: check if there's an active pipeline run to resume
+  useEffect(() => {
+    const savedRunId = getRunFromStorage();
+    if (savedRunId) {
+      setRunning(true);
+      setRunData({ id: savedRunId, status: "running", current_step: "resuming", progress: { step: "Reconnecting to pipeline..." } });
+
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) {
+          startPolling(savedRunId, session.access_token);
+        }
+      });
+    }
+
+    return () => stopPolling();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function runPipeline() {
     setRunning(true);
@@ -129,10 +175,10 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
         return;
       }
 
-      // Start polling
+      // Persist run_id so we can resume after navigation
+      saveRunToStorage(data.run_id);
       setRunData({ id: data.run_id, status: "running", current_step: "starting", progress: {} });
-      const token = session.access_token;
-      pollRef.current = setInterval(() => pollStatus(data.run_id, token), 3000);
+      startPolling(data.run_id, session.access_token);
     } catch (err) {
       setError(`Error: ${String(err)}`);
       setRunning(false);
@@ -247,7 +293,7 @@ export function PipelineTrigger({ niches }: { niches: Niche[] }) {
         </div>
       )}
 
-      {/* Startup error (before pipeline even begins) */}
+      {/* Startup error */}
       {error && !runData && (
         <div className="mt-4 flex items-start gap-2 p-3 rounded-lg text-sm bg-danger/10 text-danger">
           <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
