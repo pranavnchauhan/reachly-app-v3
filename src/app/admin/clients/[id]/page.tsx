@@ -43,7 +43,7 @@ export default async function ClientDetailPage({
   // Get niches for this company
   const { data: companyNiches } = await supabase
     .from("client_niches")
-    .select("*, niche_templates(name)")
+    .select("*, niche_templates(name, signals)")
     .eq("company_id", id)
     .order("created_at", { ascending: false });
 
@@ -52,7 +52,7 @@ export default async function ClientDetailPage({
   const { data: userNiches } = userIds.length
     ? await supabase
         .from("client_niches")
-        .select("*, niche_templates(name)")
+        .select("*, niche_templates(name, signals)")
         .in("client_id", userIds)
         .is("company_id", null)
     : { data: [] };
