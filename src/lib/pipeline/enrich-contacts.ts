@@ -1,5 +1,6 @@
-// Step 3: Enrich companies with decision-maker contacts via Apollo
-// Uses api_search (free, no credits) to find people, then people/match (credits) to get email/phone
+// Step 2: Enrich verified hot leads with decision-maker contacts via Apollo
+// Uses api_search (free) to find people, then people/match (paid credits) to get email/phone
+// Title-matching: loops through candidates until finding one matching target_titles
 
 import type { SignalResult } from "./find-signals";
 import { safeFetchJson } from "./safe-fetch";
@@ -25,13 +26,16 @@ export async function enrichContacts(
   const apiKey = process.env.APOLLO_API_KEY;
   if (!apiKey) throw new Error("APOLLO_API_KEY not set");
 
+  // Normalize target titles for matching
+  const normalizedTitles = targetTitles.map((t) => t.toLowerCase().trim());
+
   const enriched: EnrichedLead[] = [];
 
-  // Process in batches of 5 (up from 3) with shorter pause
+  // Process in batches of 5
   for (let i = 0; i < signalResults.length; i += 5) {
     const batch = signalResults.slice(i, i + 5);
     const batchResults = await Promise.all(
-      batch.map((result) => findAndEnrichContact(result, apiKey))
+      batch.map((result) => findAndEnrichContact(result, apiKey, normalizedTitles))
     );
     enriched.push(...(batchResults.filter(Boolean) as EnrichedLead[]));
 
@@ -45,32 +49,86 @@ export async function enrichContacts(
 
 async function findAndEnrichContact(
   result: SignalResult,
-  apiKey: string
+  apiKey: string,
+  targetTitles: string[]
 ): Promise<EnrichedLead | null> {
-  // Step A: Search for people (free, no credits)
-  const person = await searchForPerson(result, apiKey);
-  if (!person) return null;
+  // Step A: Search for people (free, no credits) — get up to 10 candidates
+  const candidates = await searchForPeople(result, apiKey);
+  if (!candidates.length) return null;
 
-  // Step B: Enrich with email/phone (costs credits)
-  const enriched = await enrichPerson(person, result, apiKey);
-  return enriched;
+  // Step B: Find best title match from candidates
+  const bestCandidate = findBestTitleMatch(candidates, targetTitles);
+  if (!bestCandidate) return null;
+
+  // Step C: Enrich with email/phone (costs credits)
+  return enrichPerson(bestCandidate, result, apiKey);
 }
 
-async function searchForPerson(
+function findBestTitleMatch(
+  candidates: Record<string, unknown>[],
+  targetTitles: string[]
+): Record<string, unknown> | null {
+  // Score each candidate by how well their title matches target titles
+  const scored = candidates.map((person) => {
+    const title = ((person.title as string) || "").toLowerCase();
+    let score = 0;
+
+    // Exact title match
+    if (targetTitles.some((t) => title === t)) {
+      score = 100;
+    }
+    // Title contains a target title
+    else if (targetTitles.some((t) => title.includes(t))) {
+      score = 80;
+    }
+    // Target title contains this title
+    else if (targetTitles.some((t) => t.includes(title) && title.length > 3)) {
+      score = 70;
+    }
+    // Common decision-maker keywords even if not in target_titles
+    else if (/\b(ceo|coo|cfo|founder|owner|managing director|general manager|head of|director|vp|vice president)\b/i.test(title)) {
+      score = 50;
+    }
+    // Manager-level
+    else if (/\b(manager|lead|principal|partner)\b/i.test(title)) {
+      score = 30;
+    }
+
+    // Penalize clearly wrong titles (artist, technician, intern, etc.)
+    if (/\b(artist|intern|student|assistant|receptionist|technician|coordinator|clerk)\b/i.test(title)) {
+      score = Math.max(0, score - 40);
+    }
+
+    return { person, score };
+  });
+
+  // Sort by score descending, take highest
+  scored.sort((a, b) => b.score - a.score);
+
+  // Must have at least score 30 (manager-level or above)
+  if (scored[0]?.score >= 30) return scored[0].person;
+
+  // If no good title match, still return the first c_suite/director person
+  return scored[0]?.score > 0 ? scored[0].person : null;
+}
+
+async function searchForPeople(
   result: SignalResult,
   apiKey: string
-): Promise<Record<string, unknown> | null> {
-  const seniorities = ["owner", "founder", "c_suite", "vp", "director"];
+): Promise<Record<string, unknown>[]> {
+  const seniorities = ["owner", "founder", "c_suite", "vp", "director", "manager"];
   const searches = [
-    // Try AU-located contacts first
+    // Try domain-based AU contacts first
     result.company.domain
       ? { q_organization_domains: result.company.domain, person_seniorities: seniorities, person_locations: ["Australia"] }
       : null,
+    // Name-based AU contacts
     { q_organization_name: result.company.name, person_seniorities: seniorities, person_locations: ["Australia"] },
-    // Fallback: any location
+    // Domain-based any location
     result.company.domain
       ? { q_organization_domains: result.company.domain, person_seniorities: seniorities }
       : null,
+    // Name-based any location
     { q_organization_name: result.company.name, person_seniorities: seniorities },
   ].filter(Boolean);
 
@@ -80,16 +138,16 @@ async function searchForPerson(
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
-        body: JSON.stringify({ ...params, per_page: 5, page: 1 }),
+        body: JSON.stringify({ ...params, per_page: 10, page: 1 }),
       }
     );
 
     if (!ok) continue;
     const people = (data.people as Record<string, unknown>[]) || [];
-    if (people.length > 0) return people[0];
+    if (people.length > 0) return people; // Return all candidates for title matching
   }
 
-  return null;
+  return [];
 }
 
 async function enrichPerson(
@@ -101,11 +159,8 @@ async function enrichPerson(
   const lastName = (person.last_name as string) || "";
   const personId = person.id as string;
 
-  // Use people/match to get email (costs Apollo credits)
-  // Note: phone numbers require webhook — not supported yet
   const matchParams: Record<string, unknown> = {};
 
-  // Prefer matching by Apollo ID
   if (personId) {
     matchParams.id = personId;
   } else if (firstName && lastName && result.company.domain) {
@@ -115,7 +170,6 @@ async function enrichPerson(
   } else if (person.linkedin_url) {
     matchParams.linkedin_url = person.linkedin_url;
   } else {
-    // Can't enrich without identifiers — use search data as-is
     return buildLeadFromSearch(person, result);
   }
 
@@ -129,7 +183,6 @@ async function enrichPerson(
   );
 
   if (!ok || !data.person) {
-    // Fallback to search data without enrichment
     return buildLeadFromSearch(person, result);
   }
 
@@ -137,7 +190,6 @@ async function enrichPerson(
   const org = enrichedPerson.organization as Record<string, unknown> | undefined;
   const phones = enrichedPerson.phone_numbers as Record<string, string>[] | undefined;
 
-  // Update company data from enriched org info
   if (org) {
     if (org.industry) result.company.industry = org.industry as string;
     if (org.estimated_num_employees) result.company.employee_count = org.estimated_num_employees as number;

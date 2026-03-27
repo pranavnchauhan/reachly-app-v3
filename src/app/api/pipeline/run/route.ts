@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { discoverSignals } from "@/lib/pipeline/discover-signals";
-import { apolloFallback } from "@/lib/pipeline/apollo-fallback";
 import { enrichContacts } from "@/lib/pipeline/enrich-contacts";
 import { deepResearch } from "@/lib/pipeline/deep-research";
 import type { Signal } from "@/types/database";
@@ -145,45 +144,18 @@ async function executePipeline(runId: string, nicheId: string | null) {
         (existingLeads || []).map((l: { company_name: string }) => l.company_name.toLowerCase().trim())
       );
 
-      // ─── Step 1: Signal discovery (Perplexity) ──────────────────
+      // ─── Step 1: Signal discovery — HOT LEADS ONLY ──────────────
       await updateRun("discovering", { niche: niche.name, step: "Searching news for buying signals..." });
 
-      let discovered = await discoverSignals(signalsToSearch, niche.geography || [], {
-        employeeMin: template.employee_min || undefined,
-        employeeMax: template.employee_max || undefined,
+      const discovered = await discoverSignals(signalsToSearch, niche.geography || [], {
         excludeCompanyNames,
       });
       const hotCount = discovered.length;
 
-      await updateRun("discovering", { niche: niche.name, step: `Found ${hotCount} companies from news`, hot: hotCount });
-
-      // ─── Step 2: Database enrichment fallback ─────────────────
-      if (discovered.length < 20) {
-        await updateRun("database_search", { niche: niche.name, step: "Searching company databases..." });
-
-        discovered = await apolloFallback(
-          discovered,
-          template.keywords || [],
-          template.industries || [],
-          niche.geography || [],
-          20,
-          {
-            employeeMin: template.employee_min || undefined,
-            employeeMax: template.employee_max || undefined,
-            excludeCompanyNames,
-          }
-        );
-
-        await updateRun("database_search", {
-          niche: niche.name,
-          step: `${discovered.length} total companies (${hotCount} signal-matched, ${discovered.length - hotCount} database-matched)`,
-          hot: hotCount,
-          cold: discovered.length - hotCount,
-        });
-      }
+      await updateRun("discovering", { niche: niche.name, step: `Found ${hotCount} verified hot leads from news`, hot: hotCount });
 
       if (discovered.length === 0) {
-        results.push({ niche: niche.name, step: "discovery", hot: 0, cold: 0, leads: 0, detail: "No companies found" });
+        results.push({ niche: niche.name, step: "discovery", hot: 0, cold: 0, leads: 0, detail: "No verified signal-matched companies found" });
         continue;
       }
 
@@ -293,7 +265,7 @@ async function executePipeline(runId: string, nicheId: string | null) {
       results.push({
         niche: niche.name,
         hot: hotCount,
-        cold: discovered.length - hotCount,
+        cold: 0,
         enriched: enrichedLeads.length,
         researched: Math.min(enrichedLeads.length, 5),
         leads: researchedLeads.length,

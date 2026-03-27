@@ -1,5 +1,6 @@
 // Step 1: Signal-first discovery — find companies in the news matching buying signals
 // Uses Perplexity to search verified news sources (last 60 days)
+// HOT-ONLY pipeline: only companies with verified news signals make it through
 
 import type { Signal } from "@/types/database";
 import { safeFetchJson } from "./safe-fetch";
@@ -14,12 +15,10 @@ export interface DiscoveredCompany {
   evidence: string;
   source_url: string | null;
   confidence: number;
-  source: "perplexity" | "apollo";
+  source: "perplexity";
 }
 
 export interface DiscoveryOptions {
-  employeeMin?: number;
-  employeeMax?: number;
   excludeCompanyNames?: Set<string>;
 }
 
@@ -34,7 +33,7 @@ export async function discoverSignals(
   const allDiscovered: DiscoveredCompany[] = [];
   const geoStr = geography.length > 0 ? geography.join(", ") : "Australia";
 
-  // Process all signals in parallel — much faster than sequential
+  // Process all signals in parallel
   const results = await Promise.all(
     signals.map((signal) => searchNewsForSignal(signal, geoStr, apiKey))
   );
@@ -46,9 +45,7 @@ export async function discoverSignals(
   const deduped = new Map<string, DiscoveredCompany>();
   for (const company of allDiscovered) {
     const key = company.name.toLowerCase().trim();
-    // Skip companies already in DB from previous runs
     if (options.excludeCompanyNames?.has(key)) continue;
-    // Filter out universities, government, and mega-corps
     if (isExcludedEntity(company.name)) continue;
     const existing = deduped.get(key);
     if (!existing || company.confidence > existing.confidence) {
@@ -56,14 +53,15 @@ export async function discoverSignals(
     }
   }
 
-  return Array.from(deduped.values())
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, 20); // Cap at 20 companies
+  // Only keep companies with verified source URLs (hot leads)
+  const hotLeads = Array.from(deduped.values())
+    .filter((c) => c.source_url !== null)
+    .sort((a, b) => b.confidence - a.confidence);
+
+  return hotLeads;
 }
 
 // Map internal signal names to news-searchable descriptions
-// Internal descriptions like "Complex workflows with many touchpoints" don't appear in news
-// We need observable events that journalists actually report on
 const NEWS_SEARCH_HINTS: Record<string, string> = {
   "Long Lead Times": "company facing supply chain delays, shipping disruptions, production backlogs, or delivery delays",
   "Rapid Growth": "company announcing rapid revenue growth, new funding round, expanding headcount, or opening new offices",
@@ -94,7 +92,6 @@ async function searchNewsForSignal(
   geography: string,
   apiKey: string
 ): Promise<DiscoveredCompany[]> {
-  // Use news-searchable description if available, otherwise fall back to signal description
   const searchDescription = NEWS_SEARCH_HINTS[signal.name] || signal.description;
 
   const prompt = `Find Australian companies that have recently been in the news for: ${searchDescription}
@@ -185,16 +182,20 @@ If no companies match, respond with: {"companies": []}`;
     })
   );
 
-  // Verify source URLs — check if company name actually appears on the page
+  // Verify source URLs — check company name AND evidence match the page content
   const verified = await Promise.all(
     companies.map(async (company: DiscoveredCompany) => {
-      if (!company.source_url) return company;
-      const isValid = await verifySourceUrl(company.source_url, company.name);
-      if (!isValid) {
+      if (!company.source_url) return { ...company, confidence: 0.2 }; // No URL = very low confidence
+      const verification = await verifySourceUrl(company.source_url, company.name, company.evidence);
+      if (!verification.companyFound) {
         console.warn(`Source URL rejected for ${company.name}: ${company.source_url} — company not mentioned`);
-        return { ...company, source_url: null, confidence: Math.max(0.3, company.confidence - 0.2) };
+        return { ...company, source_url: null, confidence: 0.2 };
       }
-      return company;
+      // Bonus confidence if evidence is also confirmed on page
+      const conf = verification.evidenceFound
+        ? Math.min(1, company.confidence + 0.05)
+        : company.confidence;
+      return { ...company, confidence: conf };
     })
   );
 
@@ -223,7 +224,12 @@ export function isExcludedEntity(name: string): boolean {
   return EXCLUDED_PATTERNS.some((pattern) => pattern.test(name));
 }
 
-async function verifySourceUrl(url: string, companyName: string): Promise<boolean> {
+interface VerificationResult {
+  companyFound: boolean;
+  evidenceFound: boolean;
+}
+
+async function verifySourceUrl(url: string, companyName: string, evidence: string): Promise<VerificationResult> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -236,14 +242,14 @@ async function verifySourceUrl(url: string, companyName: string): Promise<boolea
 
     clearTimeout(timeout);
 
-    if (!res.ok) return false;
+    if (!res.ok) return { companyFound: false, evidenceFound: false };
 
     const contentType = res.headers.get("content-type") || "";
-    if (!contentType.includes("text/html")) return false;
+    if (!contentType.includes("text/html")) return { companyFound: false, evidenceFound: false };
 
-    // Read first 50KB — enough to check if company is mentioned
+    // Read first 50KB
     const reader = res.body?.getReader();
-    if (!reader) return false;
+    if (!reader) return { companyFound: false, evidenceFound: false };
 
     let text = "";
     const decoder = new TextDecoder();
@@ -254,20 +260,27 @@ async function verifySourceUrl(url: string, companyName: string): Promise<boolea
     }
     reader.cancel();
 
-    // Check if company name (or significant part of it) appears in the page
-    const nameWords = companyName.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
     const pageText = text.toLowerCase();
 
-    // Full name match
-    if (pageText.includes(companyName.toLowerCase())) return true;
+    // Check company name
+    const nameWords = companyName.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+    const companyFound =
+      pageText.includes(companyName.toLowerCase()) ||
+      (nameWords[0]?.length > 3 && pageText.includes(nameWords[0]));
 
-    // At least the first significant word of the company name
-    const primaryWord = nameWords[0];
-    if (primaryWord && primaryWord.length > 3 && pageText.includes(primaryWord)) return true;
+    // Check evidence keywords (pick 2-3 significant words from evidence)
+    const evidenceWords = evidence
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .split(/\s+/)
+      .filter((w) => w.length > 4)
+      .slice(0, 5);
+    const evidenceMatches = evidenceWords.filter((w) => pageText.includes(w)).length;
+    const evidenceFound = evidenceMatches >= Math.min(2, evidenceWords.length);
 
-    return false;
+    return { companyFound, evidenceFound };
   } catch {
-    // If we can't verify, keep the URL but mark lower confidence
-    return true; // Give benefit of the doubt on network errors
+    // Network error — give benefit of the doubt
+    return { companyFound: true, evidenceFound: false };
   }
 }
