@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { discoverSignals } from "@/lib/pipeline/discover-signals";
 import { apolloFallback } from "@/lib/pipeline/apollo-fallback";
@@ -65,9 +66,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Failed to create pipeline run", details: runError?.message }, { status: 500 });
   }
 
-  // Fire and forget — run pipeline in background
-  executePipeline(run.id, nicheId || null).catch((err) => {
-    console.error("Background pipeline crashed:", err);
+  // Use after() to keep the serverless function alive after response is sent
+  after(async () => {
+    try {
+      await executePipeline(run.id, nicheId || null);
+    } catch (err) {
+      console.error("Background pipeline crashed:", err);
+      const sb = createAdminClient();
+      await sb.from("pipeline_runs").update({
+        status: "failed",
+        error: String(err),
+        completed_at: new Date().toISOString(),
+      }).eq("id", run.id);
+    }
   });
 
   return NextResponse.json({ run_id: run.id, status: "running" });
