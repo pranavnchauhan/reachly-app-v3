@@ -17,9 +17,16 @@ export interface DiscoveredCompany {
   source: "perplexity" | "apollo";
 }
 
+export interface DiscoveryOptions {
+  employeeMin?: number;
+  employeeMax?: number;
+  excludeCompanyNames?: Set<string>;
+}
+
 export async function discoverSignals(
   signals: Signal[],
-  geography: string[]
+  geography: string[],
+  options: DiscoveryOptions = {}
 ): Promise<DiscoveredCompany[]> {
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) throw new Error("PERPLEXITY_API_KEY not set");
@@ -27,9 +34,13 @@ export async function discoverSignals(
   const allDiscovered: DiscoveredCompany[] = [];
   const geoStr = geography.length > 0 ? geography.join(", ") : "Australia";
 
+  const sizeHint = options.employeeMin || options.employeeMax
+    ? `Target company size: ${options.employeeMin || 1}–${options.employeeMax || 10000} employees.`
+    : "";
+
   // Process all signals in parallel — much faster than sequential
   const results = await Promise.all(
-    signals.map((signal) => searchNewsForSignal(signal, geoStr, apiKey))
+    signals.map((signal) => searchNewsForSignal(signal, geoStr, apiKey, sizeHint))
   );
   for (const companies of results) {
     allDiscovered.push(...companies);
@@ -39,6 +50,10 @@ export async function discoverSignals(
   const deduped = new Map<string, DiscoveredCompany>();
   for (const company of allDiscovered) {
     const key = company.name.toLowerCase().trim();
+    // Skip companies already in DB from previous runs
+    if (options.excludeCompanyNames?.has(key)) continue;
+    // Filter out universities, government, and mega-corps
+    if (isExcludedEntity(company.name)) continue;
     const existing = deduped.get(key);
     if (!existing || company.confidence > existing.confidence) {
       deduped.set(key, company);
@@ -53,8 +68,13 @@ export async function discoverSignals(
 async function searchNewsForSignal(
   signal: Signal,
   geography: string,
-  apiKey: string
+  apiKey: string,
+  sizeHint: string = ""
 ): Promise<DiscoveredCompany[]> {
+  const sizeRule = sizeHint
+    ? `\n- ${sizeHint} Do NOT include large enterprises (ASX200, Fortune 500), government departments, or universities. Focus on small-to-mid-market and founder-led businesses.`
+    : "";
+
   const prompt = `Search for companies with significant presence in ${geography} that are currently showing this buying signal:
 
 "${signal.name}" — ${signal.description}
@@ -73,7 +93,9 @@ CRITICAL RULES:
 - Do NOT include overseas companies that merely do business with ${geography} — they must have a physical presence (office, team, operations) there
 - Only cite real, verifiable news sources — no blogs, recruitment sites, or generic articles
 - Only include companies where something SPECIFIC and RECENT happened
-- Include the company's Australian office location if they are a global company
+- Include the company's Australian office location if they are a global company${sizeRule}
+- Do NOT include universities, TAFEs, schools, government agencies, councils, or departments
+- Do NOT include ASX200 companies (e.g. BHP, CBA, NAB, ANZ, Westpac, Telstra, Woolworths, Wesfarmers, CSL, Macquarie)
 
 Respond in this exact JSON format:
 {
@@ -158,6 +180,28 @@ If no companies match, respond with: {"companies": []}`;
   );
 
   return verified;
+}
+
+// ─── Entity filter — block universities, government, mega-corps ──────
+const EXCLUDED_PATTERNS = [
+  // Universities & education
+  /\buniversity\b/i, /\buniversities\b/i, /\btafe\b/i, /\bcollege\b/i,
+  /\bUNSW\b/, /\bRMIT\b/, /\bUTS\b/, /\bACU\b/, /\bUSYD\b/, /\bANU\b/,
+  /\bmonash\b/i, /\bdeakin\b/i, /\bcurtin\b/i, /\bswinburne\b/i, /\bgriffith university\b/i,
+  // Government
+  /\bgovernment\b/i, /\bdepartment of\b/i, /\bcouncil\b/i, /\bminister\b/i,
+  /\bdefence\b/i, /\bATO\b/, /\bservices australia\b/i,
+  // ASX200 mega-corps
+  /\bBHP\b/, /\bRio Tinto\b/i, /\bCommonwealth Bank\b/i, /\bCBA\b/, /\bNAB\b/,
+  /\bANZ\b/, /\bWestpac\b/i, /\bTelstra\b/i, /\bWoolworths\b/i, /\bColes\b/i,
+  /\bWesfarmers\b/i, /\bCSL\b/, /\bMacquarie Group\b/i, /\bWoodside\b/i,
+  /\bFortescue\b/i, /\bQantas\b/i, /\bTransurban\b/i, /\bSuncorp\b/i,
+  /\bOrigin Energy\b/i, /\bSantos\b/i, /\bInsurance Australia\b/i,
+  /\bAtlassian\b/i, /\bCanva\b/i, /\bAfterpay\b/i, /\bBlock\b/i,
+];
+
+export function isExcludedEntity(name: string): boolean {
+  return EXCLUDED_PATTERNS.some((pattern) => pattern.test(name));
 }
 
 async function verifySourceUrl(url: string, companyName: string): Promise<boolean> {

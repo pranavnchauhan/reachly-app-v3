@@ -231,7 +231,7 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
                   {selectedLead.status === "validated" && (
                     <button onClick={() => updateLeadStatus(selectedLead.id, "published")}
                       className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors">
-                      <Eye className="w-3.5 h-3.5" /> Publish to Client
+                      <Eye className="w-3.5 h-3.5" /> Publish to {selectedLead.client_niches?.profiles?.company_name || selectedLead.client_niches?.profiles?.full_name || "Client"}
                     </button>
                   )}
                   <button onClick={() => rejectLead(selectedLead.id)}

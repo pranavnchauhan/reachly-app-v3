@@ -4,12 +4,15 @@
 import type { DiscoveredCompany } from "./discover-signals";
 import { safeFetchJson } from "./safe-fetch";
 
+import { isExcludedEntity } from "./discover-signals";
+
 export async function apolloFallback(
   existingCompanies: DiscoveredCompany[],
   keywords: string[],
   industries: string[],
   geography: string[],
-  targetCount: number = 20
+  targetCount: number = 20,
+  options: { employeeMin?: number; employeeMax?: number; excludeCompanyNames?: Set<string> } = {}
 ): Promise<DiscoveredCompany[]> {
   const remaining = targetCount - existingCompanies.length;
   if (remaining <= 0) return existingCompanies;
@@ -20,6 +23,10 @@ export async function apolloFallback(
   const existingNames = new Set(
     existingCompanies.map((c) => c.name.toLowerCase().trim())
   );
+  // Also exclude companies from previous pipeline runs
+  const allExcluded = options.excludeCompanyNames
+    ? new Set([...existingNames, ...options.excludeCompanyNames])
+    : existingNames;
 
   const allKeywords = [...keywords, ...industries];
   const searchParams: Record<string, unknown> = {
@@ -32,6 +39,12 @@ export async function apolloFallback(
   }
   if (geography.length > 0) {
     searchParams.organization_locations = geography;
+  }
+  // Employee size filter from niche template
+  if (options.employeeMin || options.employeeMax) {
+    searchParams.organization_num_employees_ranges = [
+      `${options.employeeMin || 1},${options.employeeMax || 10000}`,
+    ];
   }
 
   const { ok, data } = await safeFetchJson(
@@ -46,7 +59,10 @@ export async function apolloFallback(
   if (!ok || !Array.isArray(data.organizations)) return existingCompanies;
 
   const apolloCompanies: DiscoveredCompany[] = (data.organizations as Record<string, unknown>[])
-    .filter((org) => !existingNames.has(((org.name as string) || "").toLowerCase().trim()))
+    .filter((org) => {
+      const name = ((org.name as string) || "").toLowerCase().trim();
+      return !allExcluded.has(name) && !isExcludedEntity((org.name as string) || "");
+    })
     .slice(0, remaining)
     .map((org): DiscoveredCompany => ({
       name: (org.name as string) || "Unknown",

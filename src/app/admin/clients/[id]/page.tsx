@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Building2, Users, Target, CreditCard, Mail, Phone, MapPin, Globe,
-  Plus,
+  Plus, ClipboardList, Flame, Snowflake, Eye, Check,
 } from "lucide-react";
 import { AssignNiche } from "@/components/admin/assign-niche";
 import { AddCredits } from "@/components/admin/add-credits";
@@ -65,11 +65,16 @@ export default async function ClientDetailPage({
     .select("id, name, signals, industries")
     .eq("is_active", true);
 
-  // Get lead counts
+  // Get leads for this client
   const nicheIds = allNiches.map((n) => n.id);
-  const { count: totalLeads } = nicheIds.length
-    ? await supabase.from("leads").select("*", { count: "exact", head: true }).in("client_niche_id", nicheIds)
-    : { count: 0 };
+  const { data: clientLeads, count: totalLeads } = nicheIds.length
+    ? await supabase
+        .from("leads")
+        .select("id, company_name, contact_name, contact_title, status, disposition, signals_matched, discovered_at, published_at, revealed_at, client_niche_id", { count: "exact" })
+        .in("client_niche_id", nicheIds)
+        .order("created_at", { ascending: false })
+        .limit(50)
+    : { data: [], count: 0 };
 
   // Get credit packs — company-level + user-level
   const { data: companyPacks } = await supabase
@@ -215,6 +220,73 @@ export default async function ClientDetailPage({
           templates={templates ?? []}
           existingNiches={allNiches}
         />
+      </div>
+
+      {/* Leads */}
+      <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-6 mb-6 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <ClipboardList className="w-5 h-5 text-primary" />
+            <h2 className="font-semibold">Leads ({totalLeads ?? 0})</h2>
+          </div>
+          <Link href="/admin/leads"
+            className="text-xs text-primary hover:underline">Manage Leads</Link>
+        </div>
+        {!clientLeads?.length ? (
+          <p className="text-sm text-muted">No leads yet. Run the pipeline to discover leads for this client.</p>
+        ) : (
+          <div className="space-y-2">
+            {clientLeads.map((lead) => {
+              const isHot = (lead.signals_matched as { source_url?: string }[])?.[0]?.source_url;
+              const nicheName = allNiches.find((n) => n.id === lead.client_niche_id)?.name || "";
+              const statusColors: Record<string, string> = {
+                discovered: "bg-warning/10 text-warning",
+                validated: "bg-blue-500/10 text-blue-600",
+                published: "bg-primary/10 text-primary",
+                revealed: "bg-success/10 text-success",
+                disputed: "bg-danger/10 text-danger",
+                refunded: "bg-muted/10 text-muted",
+              };
+              return (
+                <div key={lead.id} className="flex items-center justify-between p-3 bg-background/50 border border-border/30 rounded-lg">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      {isHot ? (
+                        <Flame className="w-3 h-3 text-red-500 shrink-0" />
+                      ) : (
+                        <Snowflake className="w-3 h-3 text-blue-500 shrink-0" />
+                      )}
+                      <span className="text-sm font-medium truncate">{lead.company_name}</span>
+                    </div>
+                    <p className="text-xs text-muted mt-0.5 truncate">
+                      {lead.contact_name} — {lead.contact_title}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      {nicheName && <span className="text-[10px] text-muted">{nicheName}</span>}
+                      {lead.published_at && (
+                        <span className="text-[10px] text-muted">Published {new Date(lead.published_at).toLocaleDateString("en-AU")}</span>
+                      )}
+                      {lead.revealed_at && (
+                        <span className="text-[10px] text-success">Revealed {new Date(lead.revealed_at).toLocaleDateString("en-AU")}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 ml-3">
+                    {lead.disposition && lead.disposition !== "revealed" && (
+                      <span className="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full">{lead.disposition.replace("_", " ")}</span>
+                    )}
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${statusColors[lead.status] || "bg-muted/10 text-muted"}`}>
+                      {lead.status}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            {(totalLeads ?? 0) > 50 && (
+              <p className="text-xs text-muted text-center pt-2">Showing 50 of {totalLeads} leads</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Credits */}

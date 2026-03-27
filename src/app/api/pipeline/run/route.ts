@@ -134,10 +134,23 @@ async function executePipeline(runId: string, nicheId: string | null) {
         : allSignals;
       const signalsToSearch = enabledSignals.slice(0, 5);
 
+      // ─── Pre-step: Get existing company names for dedup ──────────
+      const { data: existingLeads } = await supabase
+        .from("leads")
+        .select("company_name")
+        .eq("client_niche_id", niche.id);
+      const excludeCompanyNames = new Set(
+        (existingLeads || []).map((l: { company_name: string }) => l.company_name.toLowerCase().trim())
+      );
+
       // ─── Step 1: Signal discovery (Perplexity) ──────────────────
       await updateRun("discovering", { niche: niche.name, step: "Searching news for buying signals..." });
 
-      let discovered = await discoverSignals(signalsToSearch, niche.geography || []);
+      let discovered = await discoverSignals(signalsToSearch, niche.geography || [], {
+        employeeMin: template.employee_min || undefined,
+        employeeMax: template.employee_max || undefined,
+        excludeCompanyNames,
+      });
       const hotCount = discovered.length;
 
       await updateRun("discovering", { niche: niche.name, step: `Found ${hotCount} companies from news`, hot: hotCount });
@@ -150,7 +163,13 @@ async function executePipeline(runId: string, nicheId: string | null) {
           discovered,
           template.keywords || [],
           template.industries || [],
-          niche.geography || []
+          niche.geography || [],
+          20,
+          {
+            employeeMin: template.employee_min || undefined,
+            employeeMax: template.employee_max || undefined,
+            excludeCompanyNames,
+          }
         );
 
         await updateRun("database_search", {

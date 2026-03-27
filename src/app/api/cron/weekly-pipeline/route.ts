@@ -65,8 +65,21 @@ export async function GET(request: Request) {
           : allSignals;
         const signalsToSearch = enabledSignals.slice(0, 5);
 
+        // Pre-step: Get existing company names for cross-run dedup
+        const { data: existingLeads } = await supabase
+          .from("leads")
+          .select("company_name")
+          .eq("client_niche_id", niche.id);
+        const excludeCompanyNames = new Set(
+          (existingLeads || []).map((l: { company_name: string }) => l.company_name.toLowerCase().trim())
+        );
+
         // Step 1: Signal discovery
-        let discovered = await discoverSignals(signalsToSearch, niche.geography || []);
+        let discovered = await discoverSignals(signalsToSearch, niche.geography || [], {
+          employeeMin: template.employee_min || undefined,
+          employeeMax: template.employee_max || undefined,
+          excludeCompanyNames,
+        });
         const hotCount = discovered.length;
 
         // Step 2: Database fallback
@@ -75,7 +88,13 @@ export async function GET(request: Request) {
             discovered,
             template.keywords || [],
             template.industries || [],
-            niche.geography || []
+            niche.geography || [],
+            20,
+            {
+              employeeMin: template.employee_min || undefined,
+              employeeMax: template.employee_max || undefined,
+              excludeCompanyNames,
+            }
           );
         }
 
