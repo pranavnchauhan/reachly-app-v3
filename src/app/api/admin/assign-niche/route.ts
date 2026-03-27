@@ -57,7 +57,7 @@ export async function PATCH(request: Request) {
   return NextResponse.json({ success: true });
 }
 
-// DELETE — remove a niche from a client (leads remain)
+// DELETE — remove a niche from a client
 export async function DELETE(request: Request) {
   const { nicheId } = await request.json();
 
@@ -67,14 +67,28 @@ export async function DELETE(request: Request) {
 
   const supabase = createAdminClient();
 
-  // Soft delete — deactivate instead of hard delete to preserve lead references
-  const { error } = await supabase
-    .from("client_niches")
-    .delete()
-    .eq("id", nicheId);
+  // Check if niche has leads — if so, soft delete (deactivate + rename)
+  const { count } = await supabase
+    .from("leads")
+    .select("*", { count: "exact", head: true })
+    .eq("client_niche_id", nicheId);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (count && count > 0) {
+    // Soft delete — deactivate and mark as removed
+    const { error } = await supabase
+      .from("client_niches")
+      .update({ is_active: false, name: `[Removed] ${nicheId.slice(0, 8)}` })
+      .eq("id", nicheId);
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  } else {
+    // No leads — safe to hard delete
+    const { error } = await supabase
+      .from("client_niches")
+      .delete()
+      .eq("id", nicheId);
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });

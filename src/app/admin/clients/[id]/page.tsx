@@ -57,7 +57,9 @@ export default async function ClientDetailPage({
         .is("company_id", null)
     : { data: [] };
 
-  const allNiches = [...(companyNiches || []), ...(userNiches || [])];
+  const allNiches = [...(companyNiches || []), ...(userNiches || [])].filter(
+    (n) => !n.name?.startsWith("[Removed]")
+  );
 
   // Get available templates
   const { data: templates } = await supabase
