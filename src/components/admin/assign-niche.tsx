@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Plus, Target, Trash2, Edit3, Check, X, ChevronDown, ChevronRight,
   Pause, Play,
@@ -37,6 +36,7 @@ export function AssignNiche({
   templates: Template[];
   existingNiches: ClientNiche[];
 }) {
+  const [niches, setNiches] = useState<ClientNiche[]>(existingNiches);
   const [showForm, setShowForm] = useState(false);
   const [editingNiche, setEditingNiche] = useState<string | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState("");
@@ -46,7 +46,6 @@ export function AssignNiche({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expandedNiche, setExpandedNiche] = useState<string | null>(null);
-  const router = useRouter();
 
   function getTemplateSignals(templateId: string): Signal[] {
     return templates.find((t) => t.id === templateId)?.signals || [];
@@ -120,8 +119,12 @@ export function AssignNiche({
     });
 
     if (res.ok) {
+      const { niche } = await res.json();
+      const template = templates.find((t) => t.id === selectedTemplate);
+      setNiches([...niches, { ...niche, niche_templates: template ? { name: template.name } : null }]);
       setShowForm(false);
-      router.refresh();
+      setSelectedTemplate("");
+      setNicheName("");
     } else {
       const data = await res.json();
       setError(data.error || "Failed to assign niche");
@@ -143,8 +146,11 @@ export function AssignNiche({
     });
 
     if (res.ok) {
+      setNiches(niches.map((n) => n.id === nicheId
+        ? { ...n, name: nicheName, geography: geography.split(",").map((g) => g.trim()).filter(Boolean), enabled_signals: enabledSignals }
+        : n
+      ));
       setEditingNiche(null);
-      router.refresh();
     }
     setLoading(false);
   }
@@ -159,25 +165,27 @@ export function AssignNiche({
     });
 
     if (res.ok) {
-      window.location.reload();
+      setNiches(niches.filter((n) => n.id !== nicheId));
     }
   }
 
   async function handleToggleActive(nicheId: string, currentActive: boolean) {
+    // Optimistic update
+    setNiches(niches.map((n) => n.id === nicheId ? { ...n, is_active: !currentActive } : n));
+
     await fetch("/api/admin/assign-niche", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nicheId, isActive: !currentActive }),
     });
-    router.refresh();
   }
 
   return (
     <div>
       {/* Existing niches */}
-      {existingNiches.length > 0 && (
+      {niches.length > 0 && (
         <div className="space-y-3 mb-4">
-          {existingNiches.map((niche) => {
+          {niches.map((niche) => {
             const isEditing = editingNiche === niche.id;
             const isExpanded = expandedNiche === niche.id;
             const templateSignals = getTemplateSignals(niche.template_id);
