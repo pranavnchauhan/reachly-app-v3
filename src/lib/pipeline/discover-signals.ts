@@ -129,7 +129,7 @@ If no companies match, respond with: {"companies": []}`;
     return [];
   }
 
-  return (parsed.companies || []).map(
+  const companies = (parsed.companies || []).map(
     (c: Record<string, unknown>): DiscoveredCompany => ({
       name: (c.name as string) || "Unknown",
       domain: (c.domain as string) || null,
@@ -143,4 +143,68 @@ If no companies match, respond with: {"companies": []}`;
       source: "perplexity" as const,
     })
   );
+
+  // Verify source URLs — check if company name actually appears on the page
+  const verified = await Promise.all(
+    companies.map(async (company: DiscoveredCompany) => {
+      if (!company.source_url) return company;
+      const isValid = await verifySourceUrl(company.source_url, company.name);
+      if (!isValid) {
+        console.warn(`Source URL rejected for ${company.name}: ${company.source_url} — company not mentioned`);
+        return { ...company, source_url: null, confidence: Math.max(0.3, company.confidence - 0.2) };
+      }
+      return company;
+    })
+  );
+
+  return verified;
+}
+
+async function verifySourceUrl(url: string, companyName: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; ReachlyBot/1.0)" },
+      signal: controller.signal,
+      redirect: "follow",
+    });
+
+    clearTimeout(timeout);
+
+    if (!res.ok) return false;
+
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("text/html")) return false;
+
+    // Read first 50KB — enough to check if company is mentioned
+    const reader = res.body?.getReader();
+    if (!reader) return false;
+
+    let text = "";
+    const decoder = new TextDecoder();
+    while (text.length < 50000) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+    reader.cancel();
+
+    // Check if company name (or significant part of it) appears in the page
+    const nameWords = companyName.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+    const pageText = text.toLowerCase();
+
+    // Full name match
+    if (pageText.includes(companyName.toLowerCase())) return true;
+
+    // At least the first significant word of the company name
+    const primaryWord = nameWords[0];
+    if (primaryWord && primaryWord.length > 3 && pageText.includes(primaryWord)) return true;
+
+    return false;
+  } catch {
+    // If we can't verify, keep the URL but mark lower confidence
+    return true; // Give benefit of the doubt on network errors
+  }
 }
