@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, Search, Building2, CheckCircle, Loader2, Plus, X,
+  ArrowLeft, Search, Building2, CheckCircle, Loader2, Plus, X, Globe,
 } from "lucide-react";
 
 export default function NewClientPage() {
@@ -33,7 +33,10 @@ export default function NewClientPage() {
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [postcode, setPostcode] = useState("");
+  const [website, setWebsite] = useState("");
   const [notes, setNotes] = useState("");
+  const [scraping, setScraping] = useState(false);
+  const [scraped, setScraped] = useState(false);
 
   const [createdId, setCreatedId] = useState("");
 
@@ -101,6 +104,28 @@ export default function NewClientPage() {
     setAbnLoading(false);
   }
 
+  async function scrapeWebsite() {
+    if (!website.trim()) return;
+    setScraping(true);
+    setScraped(false);
+
+    const res = await fetch(`/api/admin/scrape-website?url=${encodeURIComponent(website.trim())}`);
+    const data = await res.json();
+
+    if (res.ok) {
+      // Only fill fields that are currently empty — don't overwrite ABN-populated data
+      if (data.email && !companyEmail) setCompanyEmail(data.email);
+      if (data.phone && !companyPhone) setCompanyPhone(data.phone);
+      if (data.address && !address) setAddress(data.address);
+      if (data.city && !city) setCity(data.city);
+      if (data.state && !state) setState(data.state);
+      if (data.postcode && !postcode) setPostcode(data.postcode);
+      if (data.industry && !industry) setIndustry(data.industry);
+      setScraped(true);
+    }
+    setScraping(false);
+  }
+
   function addBusinessName() {
     const trimmed = newBusinessName.trim();
     if (trimmed && !businessNames.includes(trimmed)) {
@@ -132,6 +157,7 @@ export default function NewClientPage() {
         industry,
         email: companyEmail,
         phone: companyPhone,
+        website: website.trim() || null,
         address,
         city,
         state,
@@ -247,6 +273,28 @@ export default function NewClientPage() {
 
           {abnError && <p className="text-xs text-danger mt-2">{abnError}</p>}
           {abnVerified && <p className="text-xs text-success mt-2 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> ABN verified — details populated below</p>}
+        </div>
+
+        {/* Website Scrape */}
+        <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-4">
+            <Globe className="w-4 h-4 text-primary" />
+            <h2 className="font-semibold">Website</h2>
+            <span className="text-xs text-muted">(auto-fills email, phone, address from site)</span>
+          </div>
+          <div className="flex gap-2">
+            <input value={website} onChange={(e) => { setWebsite(e.target.value); setScraped(false); }}
+              className="flex-1 px-3 py-2.5 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder="e.g. seamlesspropertygroup.com.au"
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); scrapeWebsite(); } }}
+            />
+            <button type="button" onClick={scrapeWebsite} disabled={scraping || !website.trim()}
+              className="px-4 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-50 flex items-center gap-1.5">
+              {scraping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
+              {scraping ? "Fetching..." : "Fetch Details"}
+            </button>
+          </div>
+          {scraped && <p className="text-xs text-success mt-2 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Website scraped — details populated below (you can edit any field)</p>}
         </div>
 
         {/* Company Details */}
