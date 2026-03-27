@@ -152,12 +152,15 @@ export function AssignNiche({
   async function handleRemove(nicheId: string, nicheName: string) {
     if (!confirm(`Remove "${nicheName}" from this client? Leads already generated will remain.`)) return;
 
-    await fetch("/api/admin/assign-niche", {
+    const res = await fetch("/api/admin/assign-niche", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nicheId }),
     });
-    router.refresh();
+
+    if (res.ok) {
+      window.location.reload();
+    }
   }
 
   async function handleToggleActive(nicheId: string, currentActive: boolean) {
