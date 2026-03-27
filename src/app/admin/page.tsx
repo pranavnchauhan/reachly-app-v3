@@ -23,6 +23,7 @@ export default async function AdminDashboard() {
     { data: recentLeads },
     { data: clients },
     { data: pendingDisputes },
+    { data: awaitingValidation },
   ] = await Promise.all([
     supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "client"),
     supabase.from("client_niches").select("*", { count: "exact", head: true }).eq("is_active", true),
@@ -36,9 +37,24 @@ export default async function AdminDashboard() {
     supabase.from("leads").select("id, company_name, contact_name, contact_title, status, contact_email, discovered_at, signals_matched").order("created_at", { ascending: false }).limit(5),
     supabase.from("profiles").select("id, full_name, company_name, email, created_at").eq("role", "client").order("created_at", { ascending: false }).limit(5),
     supabase.from("disputes").select("id, reason, status, created_at, leads(company_name, contact_name), profiles!disputes_client_id_fkey(full_name)").eq("status", "pending").order("created_at", { ascending: false }).limit(10),
+    // Discovered leads awaiting validation — with niche and company info
+    supabase.from("leads").select("id, company_name, signals_matched, client_niches!inner(name, companies(company_name))").eq("status", "discovered").order("created_at", { ascending: false }).limit(50),
   ]);
 
   const approvalRate = (totalLeads ?? 0) > 0 ? Math.round(((validatedLeads ?? 0) + (publishedLeads ?? 0) + (revealedLeads ?? 0)) / (totalLeads ?? 1) * 100) : 0;
+
+  // Group awaiting validation leads by company
+  const validationByCompany = new Map<string, { hot: number; cold: number; total: number; niche: string }>();
+  for (const lead of awaitingValidation || []) {
+    const nicheInfo = lead.client_niches as unknown as { name: string; companies: { company_name: string } | null };
+    const companyName = nicheInfo?.companies?.company_name || "Unassigned";
+    const isHot = (lead.signals_matched as { source_url?: string }[])?.[0]?.source_url ? true : false;
+    const existing = validationByCompany.get(companyName) || { hot: 0, cold: 0, total: 0, niche: nicheInfo?.name || "" };
+    existing.total++;
+    if (isHot) existing.hot++; else existing.cold++;
+    if (!existing.niche) existing.niche = nicheInfo?.name || "";
+    validationByCompany.set(companyName, existing);
+  }
 
   return (
     <div className="space-y-6">
@@ -69,6 +85,35 @@ export default async function AdminDashboard() {
             </div>
           </div>
           <ArrowRight className="w-5 h-5 text-warning flex-shrink-0 mt-1" />
+        </Link>
+      )}
+
+      {/* Leads Awaiting Validation */}
+      {validationByCompany.size > 0 && (
+        <Link href="/admin/leads"
+          className="block bg-primary/5 border border-primary/20 rounded-xl p-5 hover:bg-primary/10 transition-colors">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-primary" />
+              <p className="font-semibold text-sm">{(awaitingValidation || []).length} leads awaiting validation</p>
+            </div>
+            <ArrowRight className="w-4 h-4 text-primary" />
+          </div>
+          <div className="space-y-2">
+            {Array.from(validationByCompany.entries()).map(([company, data]) => (
+              <div key={company} className="flex items-center justify-between text-sm">
+                <div>
+                  <span className="font-medium">{company}</span>
+                  <span className="text-xs text-muted ml-2">{data.niche}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {data.hot > 0 && <span className="text-xs bg-red-500/10 text-red-600 px-2 py-0.5 rounded-full font-medium">{data.hot} hot</span>}
+                  {data.cold > 0 && <span className="text-xs bg-blue-500/10 text-blue-600 px-2 py-0.5 rounded-full font-medium">{data.cold} cold</span>}
+                  <span className="text-xs font-bold">{data.total} total</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </Link>
       )}
 
