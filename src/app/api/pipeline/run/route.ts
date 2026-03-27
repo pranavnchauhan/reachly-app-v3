@@ -142,9 +142,9 @@ async function executePipeline(runId: string, nicheId: string | null) {
 
       await updateRun("discovering", { niche: niche.name, step: `Found ${hotCount} companies from news`, hot: hotCount });
 
-      // ─── Step 2: Apollo fallback ────────────────────────────────
+      // ─── Step 2: Database enrichment fallback ─────────────────
       if (discovered.length < 20) {
-        await updateRun("apollo_fallback", { niche: niche.name, step: "Filling remaining slots from Apollo..." });
+        await updateRun("database_search", { niche: niche.name, step: "Searching company databases..." });
 
         discovered = await apolloFallback(
           discovered,
@@ -153,9 +153,9 @@ async function executePipeline(runId: string, nicheId: string | null) {
           niche.geography || []
         );
 
-        await updateRun("apollo_fallback", {
+        await updateRun("database_search", {
           niche: niche.name,
-          step: `${discovered.length} total companies (${hotCount} hot, ${discovered.length - hotCount} cold)`,
+          step: `${discovered.length} total companies (${hotCount} signal-matched, ${discovered.length - hotCount} database-matched)`,
           hot: hotCount,
           cold: discovered.length - hotCount,
         });

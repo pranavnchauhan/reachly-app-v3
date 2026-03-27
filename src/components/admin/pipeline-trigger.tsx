@@ -41,11 +41,12 @@ interface PipelineRun {
 
 const STEP_LABELS: Record<string, string> = {
   starting: "Starting pipeline...",
+  resuming: "Reconnecting to pipeline...",
   loading_niches: "Loading niche configuration...",
-  discovering: "Searching news for buying signals...",
-  apollo_fallback: "Finding additional companies via Apollo...",
+  discovering: "Scanning for buying signals...",
+  database_search: "Searching company databases...",
   enriching: "Finding decision-maker contacts...",
-  researching: "AI-researching top leads...",
+  researching: "Researching top leads...",
   saving: "Saving leads to database...",
   done: "Pipeline complete!",
 };
