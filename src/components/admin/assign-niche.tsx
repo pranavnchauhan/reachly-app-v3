@@ -156,7 +156,11 @@ export function AssignNiche({
   }
 
   async function handleRemove(nicheId: string, nicheName: string) {
-    if (!confirm(`Remove "${nicheName}" from this client? Leads already generated will remain.`)) return;
+    if (!confirm(`Remove "${nicheName}" from this client? The master template stays intact. Leads already generated will remain.`)) return;
+
+    // Optimistic remove
+    const prev = niches;
+    setNiches(niches.filter((n) => n.id !== nicheId));
 
     const res = await fetch("/api/admin/assign-niche", {
       method: "DELETE",
@@ -164,8 +168,11 @@ export function AssignNiche({
       body: JSON.stringify({ nicheId }),
     });
 
-    if (res.ok) {
-      setNiches(niches.filter((n) => n.id !== nicheId));
+    if (!res.ok) {
+      // Revert on failure
+      setNiches(prev);
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || "Failed to remove niche");
     }
   }
 
