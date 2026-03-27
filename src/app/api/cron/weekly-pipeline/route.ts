@@ -65,11 +65,13 @@ export async function GET(request: Request) {
           : allSignals;
         const signalsToSearch = enabledSignals.slice(0, 5);
 
-        // Pre-step: Get existing company names for cross-run dedup
+        // Pre-step: Get existing company names for cross-run dedup (last 90 days)
+        const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
         const { data: existingLeads } = await supabase
           .from("leads")
           .select("company_name")
-          .eq("client_niche_id", niche.id);
+          .eq("client_niche_id", niche.id)
+          .gte("created_at", ninetyDaysAgo);
         const excludeCompanyNames = new Set(
           (existingLeads || []).map((l: { company_name: string }) => l.company_name.toLowerCase().trim())
         );
