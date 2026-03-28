@@ -14,10 +14,9 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au";
 
 export const maxDuration = 300;
 
-interface NicheResult {
-  nicheName: string;
-  clientName: string;
-  companyName: string;
+interface TemplateResult {
+  templateName: string;
+  clientCount: number;
   hot: number;
   enriched: number;
   researched: number;
@@ -33,53 +32,65 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient();
 
-  const { data: niches } = await supabase
+  // Get active templates that have at least one active client niche
+  const { data: templates } = await supabase
+    .from("niche_templates")
+    .select("*")
+    .eq("is_active", true);
+
+  if (!templates?.length) {
+    return NextResponse.json({ message: "No active templates", results: [] });
+  }
+
+  // Check which templates have active client niches
+  const { data: activeNiches } = await supabase
     .from("client_niches")
-    .select("*, niche_templates(*), profiles(full_name), companies(company_name)")
+    .select("template_id, geography")
     .eq("is_active", true)
     .not("client_id", "is", null);
 
-  if (!niches?.length) {
-    return NextResponse.json({ message: "No active niches to process", results: [] });
+  const activeTemplateIds = new Set((activeNiches || []).map((n) => n.template_id));
+  const templatesWithClients = templates.filter((t) => activeTemplateIds.has(t.id));
+
+  if (!templatesWithClients.length) {
+    return NextResponse.json({ message: "No templates with active clients", results: [] });
   }
 
   after(async () => {
-    const results: NicheResult[] = [];
+    const results: TemplateResult[] = [];
     const batchId = `weekly_${Date.now()}`;
 
-    for (const niche of niches) {
-      const template = niche.niche_templates;
-      if (!template) continue;
+    for (const template of templatesWithClients) {
+      // Get geography from first active client niche
+      const niche = (activeNiches || []).find((n) => n.template_id === template.id);
+      const geography = niche?.geography || [];
 
-      const clientName = (niche.profiles as unknown as { full_name: string })?.full_name || "Unknown";
-      const companyName = (niche.companies as unknown as { company_name: string })?.company_name || "Unknown";
+      // Count clients on this template
+      const clientCount = (activeNiches || []).filter((n) => n.template_id === template.id).length;
 
       try {
         const allSignals = (template.signals as Signal[]) || [];
-        const enabledSignals = niche.enabled_signals?.length
-          ? allSignals.filter((s: Signal) => niche.enabled_signals.includes(s.id))
-          : allSignals;
-        const signalsToSearch = enabledSignals.slice(0, 5);
+        const signalsToSearch = allSignals.slice(0, 5);
 
-        // Cross-run dedup (last 90 days)
+        // Cross-run dedup by template (last 90 days)
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
         const { data: existingLeads } = await supabase
           .from("leads")
           .select("company_name")
-          .eq("client_niche_id", niche.id)
+          .eq("niche_template_id", template.id)
           .gte("created_at", ninetyDaysAgo);
         const excludeCompanyNames = new Set(
           (existingLeads || []).map((l: { company_name: string }) => l.company_name.toLowerCase().trim())
         );
 
         // Step 1: Signal discovery — HOT LEADS ONLY
-        const discovered = await discoverSignals(signalsToSearch, niche.geography || [], {
+        const discovered = await discoverSignals(signalsToSearch, geography, {
           excludeCompanyNames,
         });
         const hotCount = discovered.length;
 
         if (discovered.length === 0) {
-          results.push({ nicheName: niche.name, clientName, companyName, hot: 0, enriched: 0, researched: 0, totalLeads: 0, error: "No verified signal-matched companies found" });
+          results.push({ templateName: template.name, clientCount, hot: 0, enriched: 0, researched: 0, totalLeads: 0, error: "No verified signal-matched companies found" });
           continue;
         }
 
@@ -93,7 +104,7 @@ export async function GET(request: Request) {
         const enrichedLeads = await enrichContacts(signalResults, template.target_titles || []);
 
         if (enrichedLeads.length === 0) {
-          results.push({ nicheName: niche.name, clientName, companyName, hot: hotCount, enriched: 0, researched: 0, totalLeads: 0, error: "No contacts found" });
+          results.push({ templateName: template.name, clientCount, hot: hotCount, enriched: 0, researched: 0, totalLeads: 0, error: "No contacts found" });
           continue;
         }
 
@@ -111,11 +122,12 @@ export async function GET(request: Request) {
           researchedLeads = [...researchedLeads, ...remaining];
         }
 
-        // Step 4: Store leads
+        // Step 4: Store leads as UNASSIGNED (template-level, no client)
         const leadsToInsert = researchedLeads.map((lead) => {
           const original = discovered.find((d) => d.name.toLowerCase() === lead.company.name.toLowerCase());
           return {
-            client_niche_id: niche.id,
+            niche_template_id: template.id,
+            client_niche_id: null,
             company_name: lead.company.name,
             company_website: lead.company.domain ? `https://${lead.company.domain}` : null,
             company_industry: lead.company.industry || "Unknown",
@@ -139,73 +151,60 @@ export async function GET(request: Request) {
         await supabase.from("leads").insert(leadsToInsert);
 
         results.push({
-          nicheName: niche.name,
-          clientName,
-          companyName,
+          templateName: template.name,
+          clientCount,
           hot: hotCount,
           enriched: enrichedLeads.length,
           researched: Math.min(enrichedLeads.length, 5),
           totalLeads: researchedLeads.length,
         });
       } catch (err) {
-        results.push({ nicheName: niche.name, clientName, companyName, hot: 0, enriched: 0, researched: 0, totalLeads: 0, error: String(err) });
+        results.push({ templateName: template.name, clientCount, hot: 0, enriched: 0, researched: 0, totalLeads: 0, error: String(err) });
       }
     }
 
     await sendAdminReport(results, batchId);
   });
 
-  return NextResponse.json({ message: `Processing ${niches.length} niches in background`, nicheCount: niches.length });
+  return NextResponse.json({ message: `Processing ${templatesWithClients.length} templates in background`, templateCount: templatesWithClients.length });
 }
 
-async function sendAdminReport(results: NicheResult[], batchId: string) {
+async function sendAdminReport(results: TemplateResult[], batchId: string) {
   const totalLeads = results.reduce((s, r) => s + r.totalLeads, 0);
   const totalHot = results.reduce((s, r) => s + r.hot, 0);
   const errors = results.filter((r) => r.error);
 
-  const byCompany = new Map<string, NicheResult[]>();
-  for (const r of results) {
-    const key = r.companyName;
-    if (!byCompany.has(key)) byCompany.set(key, []);
-    byCompany.get(key)!.push(r);
-  }
-
-  const companyRows = Array.from(byCompany.entries()).map(([company, niches]) => {
-    const hot = niches.reduce((s, n) => s + n.hot, 0);
-    const leads = niches.reduce((s, n) => s + n.totalLeads, 0);
-    const nicheNames = niches.map((n) => n.nicheName).join(", ");
-
-    return `
-      <tr>
-        <td style="padding:10px;border-bottom:1px solid #f0f0f0;font-weight:600;">${company}</td>
-        <td style="padding:10px;border-bottom:1px solid #f0f0f0;font-size:13px;color:#666;">${nicheNames}</td>
-        <td style="padding:10px;border-bottom:1px solid #f0f0f0;text-align:center;"><span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;">${hot}</span></td>
-        <td style="padding:10px;border-bottom:1px solid #f0f0f0;text-align:center;font-weight:700;font-size:16px;">${leads}</td>
-      </tr>
-    `;
-  }).join("");
+  const rows = results.map((r) => `
+    <tr>
+      <td style="padding:10px;border-bottom:1px solid #f0f0f0;font-weight:600;">${r.templateName}</td>
+      <td style="padding:10px;border-bottom:1px solid #f0f0f0;text-align:center;font-size:13px;">${r.clientCount} clients</td>
+      <td style="padding:10px;border-bottom:1px solid #f0f0f0;text-align:center;"><span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;">${r.hot}</span></td>
+      <td style="padding:10px;border-bottom:1px solid #f0f0f0;text-align:center;font-weight:700;font-size:16px;">${r.totalLeads}</td>
+      <td style="padding:10px;border-bottom:1px solid #f0f0f0;text-align:center;font-size:13px;color:#666;">${r.error || "OK"}</td>
+    </tr>
+  `).join("");
 
   const errorSection = errors.length > 0 ? `
     <div style="background:#fef2f2;border-radius:12px;padding:16px;margin:16px 0;">
       <p style="margin:0 0 8px;font-weight:600;color:#dc2626;font-size:14px;">Errors (${errors.length})</p>
-      ${errors.map((e) => `<p style="margin:0;font-size:13px;color:#666;">${e.nicheName}: ${e.error}</p>`).join("")}
+      ${errors.map((e) => `<p style="margin:0;font-size:13px;color:#666;">${e.templateName}: ${e.error}</p>`).join("")}
     </div>
   ` : "";
 
   await sendEmail({
     to: ADMIN_EMAIL,
     toName: "Reachly Admin",
-    subject: `Weekly Pipeline: ${totalLeads} verified leads discovered (${totalHot} hot signals)`,
+    subject: `Weekly Pipeline: ${totalLeads} verified leads ready for validation (${totalHot} hot signals)`,
     body: `
       <h2 style="color:#111;font-size:20px;margin:0 0 8px;">Weekly Pipeline Report</h2>
       <p style="color:#555;font-size:15px;line-height:1.6;">
-        The weekly pipeline has completed. Only verified hot leads with confirmed news signals are included.
+        Leads are now in the validation queue — review, verify contacts, and assign to clients.
       </p>
 
       <div style="display:flex;gap:16px;margin:20px 0;">
         <div style="flex:1;background:#f0fdf4;border-radius:12px;padding:16px;text-align:center;">
           <p style="margin:0;font-size:28px;font-weight:700;color:#16a34a;">${totalLeads}</p>
-          <p style="margin:4px 0 0;font-size:12px;color:#666;">Verified Leads</p>
+          <p style="margin:4px 0 0;font-size:12px;color:#666;">Leads to Validate</p>
         </div>
         <div style="flex:1;background:#fef3c7;border-radius:12px;padding:16px;text-align:center;">
           <p style="margin:0;font-size:28px;font-weight:700;color:#d97706;">${totalHot}</p>
@@ -216,13 +215,14 @@ async function sendAdminReport(results: NicheResult[], batchId: string) {
       <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px;">
         <thead>
           <tr style="text-align:left;">
-            <th style="padding:10px;border-bottom:2px solid #e5e7eb;font-size:12px;color:#888;">Client</th>
             <th style="padding:10px;border-bottom:2px solid #e5e7eb;font-size:12px;color:#888;">Niche</th>
+            <th style="padding:10px;border-bottom:2px solid #e5e7eb;font-size:12px;color:#888;text-align:center;">Clients</th>
             <th style="padding:10px;border-bottom:2px solid #e5e7eb;font-size:12px;color:#888;text-align:center;">Signals</th>
             <th style="padding:10px;border-bottom:2px solid #e5e7eb;font-size:12px;color:#888;text-align:center;">Leads</th>
+            <th style="padding:10px;border-bottom:2px solid #e5e7eb;font-size:12px;color:#888;text-align:center;">Status</th>
           </tr>
         </thead>
-        <tbody>${companyRows}</tbody>
+        <tbody>${rows}</tbody>
       </table>
 
       ${errorSection}
@@ -230,7 +230,7 @@ async function sendAdminReport(results: NicheResult[], batchId: string) {
       <div style="margin:24px 0;">
         <a href="${APP_URL}/admin/leads"
            style="display:inline-block;background:#16a34a;color:#fff;padding:14px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:15px;">
-          Review & Validate Leads
+          Review & Assign Leads
         </a>
       </div>
 

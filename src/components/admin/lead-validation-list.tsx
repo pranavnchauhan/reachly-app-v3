@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   Check, X, Eye, Mail, Linkedin, Globe, Phone, Building2, MapPin,
-  Flame, Snowflake, ExternalLink, ChevronRight, Search,
+  Flame, ExternalLink, ChevronRight, Search, Users, RefreshCw, Star, ArrowRight,
 } from "lucide-react";
 import type { MatchedSignal, ApproachStrategy, GeneratedEmail } from "@/types/database";
 
@@ -27,67 +27,177 @@ interface Lead {
   email_templates: GeneratedEmail[];
   status: string;
   discovered_at: string;
+  niche_template_id: string | null;
+  niche_templates: { id: string; name: string } | null;
   client_niches: {
     name: string;
     client_id: string;
     profiles: { full_name: string; company_name: string | null };
-  };
+  } | null;
 }
 
-export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
+interface Template {
+  id: string;
+  name: string;
+}
+
+interface ClientRecommendation {
+  clientNicheId: string;
+  nicheName: string;
+  clientName: string;
+  companyName: string;
+  assignedLeads: number;
+  availableCredits: number;
+  recommended: boolean;
+  noCredits: boolean;
+}
+
+interface ContactCandidate {
+  id: string;
+  name: string;
+  title: string;
+  linkedin_url: string | null;
+  city: string | null;
+  state: string | null;
+}
+
+export function LeadValidationList({ initialLeads, templates }: { initialLeads: Lead[]; templates: Template[] }) {
   const [leads, setLeads] = useState(initialLeads);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [filter, setFilter] = useState<"all" | "discovered" | "validated">("all");
+  const [nicheFilter, setNicheFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const supabase = createClient();
 
-  async function updateLeadStatus(id: string, status: "validated" | "published") {
-    const res = await fetch("/api/admin/update-lead", {
+  // Smart distribution state
+  const [recommendations, setRecommendations] = useState<ClientRecommendation[]>([]);
+  const [loadingRecs, setLoadingRecs] = useState(false);
+
+  // Verify contact state
+  const [candidates, setCandidates] = useState<ContactCandidate[]>([]);
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
+  const [enrichingId, setEnrichingId] = useState<string | null>(null);
+
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // ─── Actions ──────────────────────────────────────────────────────
+
+  const validateLead = useCallback(async (id: string) => {
+    setActionLoading(id);
+    const res = await fetch("/api/admin/validate-lead", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ leadId: id, status }),
+      body: JSON.stringify({ leadId: id, action: "validate" }),
     });
     if (res.ok) {
-      setLeads(leads.map((l) => l.id === id ? { ...l, status } : l));
-      if (selectedLead?.id === id) setSelectedLead({ ...selectedLead, status });
+      setLeads((prev) => prev.map((l) => l.id === id ? { ...l, status: "validated" } : l));
+      if (selectedLead?.id === id) setSelectedLead((prev) => prev ? { ...prev, status: "validated" } : null);
     }
-  }
+    setActionLoading(null);
+  }, [selectedLead]);
 
-  async function rejectLead(id: string) {
-    const res = await fetch("/api/admin/delete-leads", {
+  const publishLead = useCallback(async (id: string, clientNicheId: string, contactOverride?: Record<string, unknown>) => {
+    setActionLoading(id);
+    const res = await fetch("/api/admin/validate-lead", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ leadIds: [id] }),
+      body: JSON.stringify({ leadId: id, action: "publish", clientNicheId, contactOverride }),
     });
     if (res.ok) {
-      setLeads(leads.filter((l) => l.id !== id));
+      setLeads((prev) => prev.filter((l) => l.id !== id));
+      setSelectedLead(null);
+      setRecommendations([]);
+    }
+    setActionLoading(null);
+  }, []);
+
+  const rejectLead = useCallback(async (id: string) => {
+    if (!confirm("Reject this lead? It will be archived.")) return;
+    setActionLoading(id);
+    const res = await fetch("/api/admin/validate-lead", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ leadId: id, action: "reject" }),
+    });
+    if (res.ok) {
+      setLeads((prev) => prev.filter((l) => l.id !== id));
       if (selectedLead?.id === id) setSelectedLead(null);
     }
-  }
+    setActionLoading(null);
+  }, [selectedLead]);
 
-  async function clearLeads(ids: string[]) {
-    const res = await fetch("/api/admin/delete-leads", {
+  // Fetch client recommendations for a lead
+  const fetchRecommendations = useCallback(async (templateId: string) => {
+    setLoadingRecs(true);
+    const res = await fetch(`/api/admin/lead-recommendations?templateId=${templateId}`);
+    if (res.ok) {
+      const data = await res.json();
+      setRecommendations(data.recommendations || []);
+    }
+    setLoadingRecs(false);
+  }, []);
+
+  // Verify contact — search Apollo for alternatives
+  const verifyContact = useCallback(async (companyName: string, companyDomain: string | null) => {
+    setLoadingCandidates(true);
+    setCandidates([]);
+    const res = await fetch("/api/admin/verify-contact", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ leadIds: ids }),
+      body: JSON.stringify({ companyName, companyDomain: companyDomain?.replace(/^https?:\/\//, "") }),
     });
     if (res.ok) {
-      setLeads(leads.filter((l) => !ids.includes(l.id)));
-      setSelectedLead(null);
+      const data = await res.json();
+      setCandidates(data.candidates || []);
     }
-  }
+    setLoadingCandidates(false);
+  }, []);
+
+  // Enrich a candidate and update the lead
+  const enrichCandidate = useCallback(async (candidateId: string, leadId: string) => {
+    setEnrichingId(candidateId);
+    const res = await fetch("/api/admin/verify-contact", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidateId }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const contact = data.contact;
+      // Update lead locally
+      setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, ...contact } : l));
+      if (selectedLead?.id === leadId) {
+        setSelectedLead((prev) => prev ? { ...prev, ...contact } : null);
+      }
+      setCandidates([]);
+    }
+    setEnrichingId(null);
+  }, [selectedLead]);
+
+  // ─── Filtering ────────────────────────────────────────────────────
+
+  const nicheNames = [...new Set(leads.map((l) => l.niche_templates?.name || "Unknown"))];
 
   const filtered = leads
     .filter((l) => filter === "all" || l.status === filter)
+    .filter((l) => nicheFilter === "all" || l.niche_templates?.name === nicheFilter)
     .filter((l) => !searchQuery || `${l.company_name} ${l.contact_name} ${l.contact_title} ${l.company_industry}`.toLowerCase().includes(searchQuery.toLowerCase()));
 
   const isHot = (lead: Lead) => lead.signals_matched?.[0]?.source_url;
 
+  // When selecting a lead, auto-fetch recommendations if it has a template
+  const selectLead = (lead: Lead) => {
+    setSelectedLead(lead);
+    setCandidates([]);
+    if (lead.niche_template_id) {
+      fetchRecommendations(lead.niche_template_id);
+    }
+  };
+
   return (
     <div>
       {/* Filters */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex gap-2">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="flex gap-2 flex-wrap">
           {(["all", "discovered", "validated"] as const).map((f) => (
             <button key={f} onClick={() => setFilter(f)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
@@ -96,25 +206,19 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
               {f.charAt(0).toUpperCase() + f.slice(1)} ({f === "all" ? leads.length : leads.filter(l => l.status === f).length})
             </button>
           ))}
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
-            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary w-48"
-              placeholder="Search leads..." />
-          </div>
-          {leads.length > 0 && (
-            <button
-              onClick={async () => {
-                if (!confirm(`Delete all ${filtered.length} leads?`)) return;
-                await clearLeads(filtered.map((l) => l.id));
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-danger bg-danger/10 hover:bg-danger/20"
-            >
-              <X className="w-3.5 h-3.5" /> Clear ({filtered.length})
-            </button>
+          {nicheNames.length > 1 && (
+            <select value={nicheFilter} onChange={(e) => setNicheFilter(e.target.value)}
+              className="px-3 py-1.5 rounded-lg text-sm border border-border bg-card text-foreground">
+              <option value="all">All Niches</option>
+              {nicheNames.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
           )}
+        </div>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+          <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary w-48"
+            placeholder="Search leads..." />
         </div>
       </div>
 
@@ -124,70 +228,42 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
         </div>
       ) : (
         <div className="flex gap-6">
-          {/* Lead Cards Grid */}
-          <div className={`grid grid-cols-1 ${selectedLead ? "md:grid-cols-1 w-1/3" : "md:grid-cols-2 lg:grid-cols-3"} gap-3 transition-all`}>
+          {/* Lead Cards */}
+          <div className={`grid grid-cols-1 ${selectedLead ? "w-1/3" : "md:grid-cols-2 lg:grid-cols-3"} gap-3 transition-all`}>
             {filtered.map((lead) => (
-              <div
-                key={lead.id}
-                onClick={() => setSelectedLead(lead)}
+              <div key={lead.id} onClick={() => selectLead(lead)}
                 className={`bg-card border rounded-xl p-4 cursor-pointer transition-all hover:shadow-md ${
                   selectedLead?.id === lead.id ? "border-primary ring-2 ring-primary/20" : "border-border hover:border-primary/50"
-                }`}
-              >
-                {/* Source + Status badges */}
+                }`}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     {isHot(lead) ? (
                       <span className="text-[10px] font-semibold bg-red-500 text-white px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
                         <Flame className="w-2.5 h-2.5" /> HOT
                       </span>
-                    ) : (
-                      <span className="text-[10px] font-semibold bg-blue-500 text-white px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                        <Snowflake className="w-2.5 h-2.5" /> COLD
-                      </span>
-                    )}
+                    ) : null}
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
                       lead.status === "discovered" ? "bg-warning/10 text-warning" : "bg-success/10 text-success"
                     }`}>{lead.status}</span>
                   </div>
-                  {lead.signals_matched?.[0] && (
-                    <span className="text-[10px] text-muted">
-                      {Math.round(lead.signals_matched[0].confidence * 100)}%
-                    </span>
-                  )}
+                  <span className="text-[10px] text-muted">
+                    {lead.signals_matched?.[0] ? `${Math.round(lead.signals_matched[0].confidence * 100)}%` : ""}
+                  </span>
                 </div>
-
-                {/* Company + Contact */}
                 <h3 className="font-semibold text-sm">{lead.company_name}</h3>
-                <p className="text-xs text-muted mt-0.5">
-                  {lead.contact_name} — {lead.contact_title}
-                </p>
-
-                {/* Signal badges */}
+                <p className="text-xs text-muted mt-0.5">{lead.contact_name} — {lead.contact_title}</p>
                 <div className="flex flex-wrap gap-1 mt-2">
                   {lead.signals_matched?.slice(0, 2).map((s, i) => (
-                    <span key={i} className="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full">
-                      {s.signal_name}
-                    </span>
+                    <span key={i} className="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full">{s.signal_name}</span>
                   ))}
-                  {(lead.signals_matched?.length ?? 0) > 2 && (
-                    <span className="text-[10px] text-muted">+{lead.signals_matched.length - 2}</span>
-                  )}
                 </div>
-
-                {/* Contact info indicators */}
                 <div className="flex items-center gap-2 mt-2 text-muted">
                   {lead.contact_email && <Mail className="w-3 h-3 text-success" />}
                   {lead.contact_phone && <Phone className="w-3 h-3 text-success" />}
                   {lead.contact_linkedin && <Linkedin className="w-3 h-3 text-success" />}
-                  {lead.company_website && <Globe className="w-3 h-3 text-success" />}
                 </div>
-
-                {/* Client tag */}
-                {lead.client_niches && (
-                  <p className="text-[10px] text-muted mt-2 truncate">
-                    {lead.client_niches.profiles?.company_name || lead.client_niches.profiles?.full_name} — {lead.client_niches.name}
-                  </p>
+                {lead.niche_templates && (
+                  <p className="text-[10px] text-primary/70 mt-2 font-medium">{lead.niche_templates.name}</p>
                 )}
               </div>
             ))}
@@ -196,24 +272,25 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
           {/* Detail Panel */}
           {selectedLead && (
             <div className="flex-1 overflow-y-auto max-h-[calc(100vh-200px)] sticky top-24 space-y-4">
-              {/* Header Card */}
+
+              {/* Header + Actions */}
               <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-5 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    {isHot(selectedLead) ? (
+                    {isHot(selectedLead) && (
                       <span className="text-xs font-semibold bg-red-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <Flame className="w-3 h-3" /> HOT — News Signal
-                      </span>
-                    ) : (
-                      <span className="text-xs font-semibold bg-blue-500 text-white px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <Snowflake className="w-3 h-3" /> COLD — Database
+                        <Flame className="w-3 h-3" /> HOT
                       </span>
                     )}
                     <span className={`text-xs px-2 py-0.5 rounded-full ${
                       selectedLead.status === "discovered" ? "bg-warning/10 text-warning" : "bg-success/10 text-success"
                     }`}>{selectedLead.status}</span>
+                    {selectedLead.niche_templates && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">{selectedLead.niche_templates.name}</span>
+                    )}
                   </div>
-                  <button onClick={() => setSelectedLead(null)} className="text-muted hover:text-foreground p-1 rounded-lg hover:bg-background">
+                  <button onClick={() => { setSelectedLead(null); setRecommendations([]); setCandidates([]); }}
+                    className="text-muted hover:text-foreground p-1 rounded-lg hover:bg-background">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
@@ -221,27 +298,104 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
                 <h2 className="text-xl font-bold">{selectedLead.company_name}</h2>
                 <p className="text-sm text-muted mt-1">{selectedLead.contact_name} — {selectedLead.contact_title}</p>
 
-                <div className="flex items-center gap-2 mt-4">
+                <div className="flex items-center gap-2 mt-4 flex-wrap">
                   {selectedLead.status === "discovered" && (
-                    <button onClick={() => updateLeadStatus(selectedLead.id, "validated")}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-success text-white text-sm font-medium hover:bg-success/90 transition-colors">
+                    <button onClick={() => validateLead(selectedLead.id)}
+                      disabled={actionLoading === selectedLead.id}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-success text-white text-sm font-medium hover:bg-success/90 transition-colors disabled:opacity-50">
                       <Check className="w-3.5 h-3.5" /> Validate
                     </button>
                   )}
-                  {selectedLead.status === "validated" && (
-                    <button onClick={() => updateLeadStatus(selectedLead.id, "published")}
-                      className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors">
-                      <Eye className="w-3.5 h-3.5" /> Publish to {selectedLead.client_niches?.profiles?.company_name || selectedLead.client_niches?.profiles?.full_name || "Client"}
-                    </button>
-                  )}
+                  <button onClick={() => verifyContact(selectedLead.company_name, selectedLead.company_website)}
+                    disabled={loadingCandidates}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-primary/30 text-primary text-sm font-medium hover:bg-primary/10 transition-colors disabled:opacity-50">
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingCandidates ? "animate-spin" : ""}`} /> Verify Contact
+                  </button>
                   <button onClick={() => rejectLead(selectedLead.id)}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-danger/30 text-danger text-sm font-medium hover:bg-danger/10 transition-colors">
+                    disabled={actionLoading === selectedLead.id}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-danger/30 text-danger text-sm font-medium hover:bg-danger/10 transition-colors disabled:opacity-50">
                     <X className="w-3.5 h-3.5" /> Reject
                   </button>
                 </div>
               </div>
 
-              {/* Company & Contact Card */}
+              {/* Verify Contact Candidates */}
+              {candidates.length > 0 && (
+                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-5 shadow-sm">
+                  <h4 className="text-xs font-semibold text-amber-800 dark:text-amber-200 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5" /> Alternative Contacts ({candidates.length})
+                  </h4>
+                  <div className="space-y-2">
+                    {candidates.map((c) => (
+                      <div key={c.id} className="flex items-center justify-between bg-white dark:bg-background/50 border border-border/30 rounded-lg p-3">
+                        <div>
+                          <p className="text-sm font-medium">{c.name}</p>
+                          <p className="text-xs text-muted">{c.title}</p>
+                          {(c.city || c.state) && <p className="text-[10px] text-muted">{[c.city, c.state].filter(Boolean).join(", ")}</p>}
+                        </div>
+                        <button onClick={() => enrichCandidate(c.id, selectedLead.id)}
+                          disabled={enrichingId === c.id}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50">
+                          {enrichingId === c.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                          Use This Contact
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Smart Client Recommendations (for validated leads) */}
+              {selectedLead.status === "validated" && (
+                <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl p-5 shadow-sm">
+                  <h4 className="text-xs font-semibold text-blue-800 dark:text-blue-200 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                    <ArrowRight className="w-3.5 h-3.5" /> Assign to Client
+                  </h4>
+                  {loadingRecs ? (
+                    <p className="text-sm text-muted">Loading recommendations...</p>
+                  ) : recommendations.length === 0 ? (
+                    <p className="text-sm text-muted">No clients subscribed to this niche yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {recommendations.map((r) => (
+                        <div key={r.clientNicheId}
+                          className={`flex items-center justify-between rounded-lg p-3 border ${
+                            r.noCredits
+                              ? "bg-gray-50 dark:bg-gray-900/30 border-gray-200 dark:border-gray-800 opacity-60"
+                              : r.recommended
+                                ? "bg-green-50 dark:bg-green-950/30 border-green-300 dark:border-green-800"
+                                : "bg-white dark:bg-background/50 border-border/30"
+                          }`}>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium">{r.companyName}</p>
+                              {r.recommended && (
+                                <span className="text-[10px] font-semibold bg-green-500 text-white px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                                  <Star className="w-2.5 h-2.5" /> RECOMMENDED
+                                </span>
+                              )}
+                              {r.noCredits && (
+                                <span className="text-[10px] font-semibold bg-gray-400 text-white px-1.5 py-0.5 rounded-full">NO CREDITS</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted mt-0.5">
+                              {r.assignedLeads} leads assigned · {r.availableCredits} credits available
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => publishLead(selectedLead.id, r.clientNicheId)}
+                            disabled={r.noCredits || actionLoading === selectedLead.id}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed">
+                            <Eye className="w-3 h-3" /> Publish
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Company & Contact */}
               <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-5 shadow-sm">
                 <div className="grid grid-cols-2 gap-5">
                   <div>
@@ -278,7 +432,7 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
                       {selectedLead.contact_linkedin && (
                         <a href={selectedLead.contact_linkedin} target="_blank" rel="noopener noreferrer"
                           className="flex items-center gap-1.5 text-primary hover:underline">
-                          <Linkedin className="w-3.5 h-3.5 shrink-0" /> LinkedIn Profile
+                          <Linkedin className="w-3.5 h-3.5 shrink-0" /> LinkedIn
                         </a>
                       )}
                     </div>
@@ -286,21 +440,7 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
                 </div>
               </div>
 
-              {/* Contact Background Card */}
-              {selectedLead.contact_summary && (
-                <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-5 shadow-sm">
-                  <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">Contact Background</h4>
-                  <p className="text-sm text-muted leading-relaxed">{selectedLead.contact_summary}</p>
-                </div>
-              )}
-
-              {/* Why This Lead Card */}
-              <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-5 shadow-sm">
-                <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">Why This Lead</h4>
-                <p className="text-sm leading-relaxed">{selectedLead.justification}</p>
-              </div>
-
-              {/* Signals Card */}
+              {/* Signals */}
               <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-5 shadow-sm">
                 <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">
                   Signals ({selectedLead.signals_matched?.length || 0})
@@ -326,11 +466,19 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
                 </div>
               </div>
 
-              {/* Approach Strategies Card */}
+              {/* Why This Lead */}
+              {selectedLead.justification && (
+                <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-5 shadow-sm">
+                  <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">Why This Lead</h4>
+                  <p className="text-sm leading-relaxed">{selectedLead.justification}</p>
+                </div>
+              )}
+
+              {/* Strategies */}
               {selectedLead.approach_strategies?.length > 0 && (
                 <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-5 shadow-sm">
                   <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">
-                    Approach Strategies ({selectedLead.approach_strategies.length})
+                    Strategies ({selectedLead.approach_strategies.length})
                   </h4>
                   <div className="space-y-2">
                     {selectedLead.approach_strategies.map((s, i) => (
@@ -350,11 +498,11 @@ export function LeadValidationList({ initialLeads }: { initialLeads: Lead[] }) {
                 </div>
               )}
 
-              {/* Email Templates Card */}
+              {/* Emails */}
               {selectedLead.email_templates?.length > 0 && (
                 <div className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-xl p-5 shadow-sm">
                   <h4 className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">
-                    Email Templates ({selectedLead.email_templates.length})
+                    Emails ({selectedLead.email_templates.length})
                   </h4>
                   <div className="space-y-3">
                     {selectedLead.email_templates.map((e, i) => (

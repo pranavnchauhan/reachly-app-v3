@@ -109,58 +109,66 @@ async function executePipeline(runId: string, nicheId: string | null) {
   }
 
   try {
-    // Load niches
+    // Load niche templates (run once per master template, not per client niche)
     await updateRun("loading_niches", {});
-    let query = supabase.from("client_niches").select("*, niche_templates(*)").eq("is_active", true);
-    if (nicheId) query = query.eq("id", nicheId);
-    const { data: niches, error: nicheError } = await query;
+    let query = supabase.from("niche_templates").select("*").eq("is_active", true);
+    if (nicheId) {
+      // If a specific client_niche was selected, get its template
+      const { data: cn } = await supabase.from("client_niches").select("template_id").eq("id", nicheId).single();
+      if (cn) query = query.eq("id", cn.template_id);
+      else query = query.eq("id", nicheId); // Maybe they passed a template ID directly
+    }
+    const { data: templates, error: templateError } = await query;
 
-    if (nicheError || !niches?.length) {
-      await failRun(nicheError?.message || "No active niches to process");
+    if (templateError || !templates?.length) {
+      await failRun(templateError?.message || "No active niche templates to process");
       return;
     }
 
     const results = [];
     const batchId = `batch_${Date.now()}`;
 
-    for (const niche of niches) {
-      const template = niche.niche_templates;
-      if (!template) continue;
-
+    for (const template of templates) {
       const allSignals = (template.signals as Signal[]) || [];
-      const enabledSignals = niche.enabled_signals?.length
-        ? allSignals.filter((s: Signal) => niche.enabled_signals.includes(s.id))
-        : allSignals;
-      const signalsToSearch = enabledSignals.slice(0, 5);
+      const signalsToSearch = allSignals.slice(0, 5);
+
+      // Get geography from any active client niche using this template
+      const { data: clientNiches } = await supabase
+        .from("client_niches")
+        .select("geography")
+        .eq("template_id", template.id)
+        .eq("is_active", true)
+        .limit(1);
+      const geography = clientNiches?.[0]?.geography || [];
 
       // ─── Pre-step: Get existing company names for dedup (last 90 days) ──
       const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
       const { data: existingLeads } = await supabase
         .from("leads")
         .select("company_name")
-        .eq("client_niche_id", niche.id)
+        .eq("niche_template_id", template.id)
         .gte("created_at", ninetyDaysAgo);
       const excludeCompanyNames = new Set(
         (existingLeads || []).map((l: { company_name: string }) => l.company_name.toLowerCase().trim())
       );
 
       // ─── Step 1: Signal discovery — HOT LEADS ONLY ──────────────
-      await updateRun("discovering", { niche: niche.name, step: "Searching news for buying signals..." });
+      await updateRun("discovering", { niche: template.name, step: "Searching news for buying signals..." });
 
-      const discovered = await discoverSignals(signalsToSearch, niche.geography || [], {
+      const discovered = await discoverSignals(signalsToSearch, geography, {
         excludeCompanyNames,
       });
       const hotCount = discovered.length;
 
-      await updateRun("discovering", { niche: niche.name, step: `Found ${hotCount} verified hot leads from news`, hot: hotCount });
+      await updateRun("discovering", { niche: template.name, step: `Found ${hotCount} verified hot leads from news`, hot: hotCount });
 
       if (discovered.length === 0) {
-        results.push({ niche: niche.name, step: "discovery", hot: 0, cold: 0, leads: 0, detail: "No verified signal-matched companies found" });
+        results.push({ niche: template.name, step: "discovery", hot: 0, cold: 0, leads: 0, detail: "No verified signal-matched companies found" });
         continue;
       }
 
-      // ─── Step 3: Enrich contacts ────────────────────────────────
-      await updateRun("enriching", { niche: niche.name, step: "Finding decision-maker contacts..." });
+      // ─── Step 2: Enrich contacts ────────────────────────────────
+      await updateRun("enriching", { niche: template.name, step: "Finding decision-maker contacts..." });
 
       const signalResults: SignalResult[] = discovered.map((d) => ({
         company: {
@@ -185,14 +193,14 @@ async function executePipeline(runId: string, nicheId: string | null) {
       const enrichedLeads = await enrichContacts(signalResults, template.target_titles || []);
 
       await updateRun("enriching", {
-        niche: niche.name,
+        niche: template.name,
         step: `${enrichedLeads.length} leads with contacts`,
         enriched: enrichedLeads.length,
       });
 
       if (enrichedLeads.length === 0) {
         results.push({
-          niche: niche.name,
+          niche: template.name,
           step: "enrichment",
           hot: hotCount,
           cold: discovered.length - hotCount,
@@ -203,7 +211,7 @@ async function executePipeline(runId: string, nicheId: string | null) {
       }
 
       // ─── Step 4: Deep research (top 5) ──────────────────────────
-      await updateRun("researching", { niche: niche.name, step: "AI-researching top leads..." });
+      await updateRun("researching", { niche: template.name, step: "AI-researching top leads..." });
 
       let researchedLeads = await deepResearch(
         enrichedLeads.slice(0, 5),
@@ -222,20 +230,21 @@ async function executePipeline(runId: string, nicheId: string | null) {
       }
 
       await updateRun("researching", {
-        niche: niche.name,
+        niche: template.name,
         step: `${researchedLeads.length} leads fully processed`,
         researched: Math.min(enrichedLeads.length, 5),
       });
 
       // ─── Step 5: Store leads ────────────────────────────────────
-      await updateRun("saving", { niche: niche.name, step: "Saving leads to database..." });
+      await updateRun("saving", { niche: template.name, step: "Saving leads to database..." });
 
       const leadsToInsert = researchedLeads.map((lead) => {
         const original = discovered.find(
           (d) => d.name.toLowerCase() === lead.company.name.toLowerCase()
         );
         return {
-          client_niche_id: niche.id,
+          niche_template_id: template.id,
+          client_niche_id: null,
           company_name: lead.company.name,
           company_website: lead.company.domain ? `https://${lead.company.domain}` : null,
           company_industry: lead.company.industry || "Unknown",
@@ -263,7 +272,7 @@ async function executePipeline(runId: string, nicheId: string | null) {
       if (insertError) console.error("Insert error:", insertError);
 
       results.push({
-        niche: niche.name,
+        niche: template.name,
         hot: hotCount,
         cold: 0,
         enriched: enrichedLeads.length,
