@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireAuth } from "@/lib/auth-guard";
 
 export async function POST(request: Request) {
-  const { leadId, clientId, disposition, dispositionNote, followUpDate, dealValue, leadRating } = await request.json();
+  const auth = await requireAuth(request);
+  if (!auth.authorized) return auth.response;
 
-  if (!leadId || !clientId || !disposition) {
-    return NextResponse.json({ error: "leadId, clientId, and disposition required" }, { status: 400 });
+  const { leadId, disposition, dispositionNote, followUpDate, dealValue, leadRating } = await request.json();
+  const clientId = auth.userId;
+
+  if (!leadId || !disposition) {
+    return NextResponse.json({ error: "leadId and disposition required" }, { status: 400 });
   }
 
   const supabase = createAdminClient();

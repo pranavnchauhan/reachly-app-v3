@@ -1,5 +1,5 @@
 "use client";
-
+import { authFetch } from "@/lib/auth-fetch";
 import { useState, useEffect, useCallback } from "react";
 import {
   Eye, Mail, Linkedin, Globe, Phone, Building2, MapPin, Lock,
@@ -152,7 +152,7 @@ export function ClientLeadsList({
   const [savingDisposition, setSavingDisposition] = useState(false);
 
   const loadNotes = useCallback(async (leadId: string) => {
-    const res = await fetch(`/api/leads/notes?leadId=${leadId}`);
+    const res = await authFetch(`/api/leads/notes?leadId=${leadId}`);
     if (res.ok) {
       const { notes: data } = await res.json();
       setNotes(data || []);
@@ -168,10 +168,9 @@ export function ClientLeadsList({
   async function revealLead(leadId: string) {
     if (credits < 1) return;
     setRevealing(leadId);
-    const res = await fetch("/api/leads/reveal", {
+    const res = await authFetch("/api/leads/reveal", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ leadId, clientId }),
+      body: JSON.stringify({ leadId }),
     });
     if (res.ok) {
       const { lead } = await res.json();
@@ -196,13 +195,12 @@ export function ClientLeadsList({
     if (!selectedLead) return;
     setSavingDisposition(true);
 
-    const body: Record<string, unknown> = { leadId: selectedLead.id, clientId, disposition: selectedLead.disposition || "revealed" };
+    const body: Record<string, unknown> = { leadId: selectedLead.id, disposition: selectedLead.disposition || "revealed" };
     body[apiField] = value;
     if (apiField === "disposition") body.disposition = value;
 
-    const res = await fetch("/api/leads/disposition", {
+    const res = await authFetch("/api/leads/disposition", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
 
@@ -222,10 +220,9 @@ export function ClientLeadsList({
     const text = content || newNote.trim();
     if (!text) return;
 
-    const res = await fetch("/api/leads/notes", {
+    const res = await authFetch("/api/leads/notes", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ leadId: selectedLead.id, clientId, type, content: text }),
+      body: JSON.stringify({ leadId: selectedLead.id, type, content: text }),
     });
 
     if (res.ok) {

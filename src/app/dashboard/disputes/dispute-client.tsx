@@ -1,5 +1,5 @@
 "use client";
-
+import { authFetch } from "@/lib/auth-fetch";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -138,12 +138,10 @@ export function DisputeClient({
       screenshot_url: ev.screenshot_url,
     }));
 
-    const res = await fetch("/api/disputes", {
+    const res = await authFetch("/api/disputes", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         leadId: selectedLeadId,
-        clientId,
         channelEvidence,
         summary: summary || null,
       }),

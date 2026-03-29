@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireAuth } from "@/lib/auth-guard";
 import { sendEmail } from "@/lib/email";
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@reachly.com.au";
@@ -13,10 +14,14 @@ interface ChannelEvidence {
 }
 
 export async function POST(request: Request) {
-  const { leadId, clientId, channelEvidence, summary } = await request.json();
+  const auth = await requireAuth(request);
+  if (!auth.authorized) return auth.response;
 
-  if (!leadId || !clientId || !channelEvidence?.length) {
-    return NextResponse.json({ error: "leadId, clientId, and channelEvidence required" }, { status: 400 });
+  const { leadId, channelEvidence, summary } = await request.json();
+  const clientId = auth.userId;
+
+  if (!leadId || !channelEvidence?.length) {
+    return NextResponse.json({ error: "leadId and channelEvidence required" }, { status: 400 });
   }
 
   const supabase = createAdminClient();

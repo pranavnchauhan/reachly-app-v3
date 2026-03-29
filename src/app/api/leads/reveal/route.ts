@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireAuth } from "@/lib/auth-guard";
 import { sendEmail, leadRevealedEmail, creditLowEmail } from "@/lib/email";
 
 export async function POST(request: Request) {
+  const auth = await requireAuth(request);
+  if (!auth.authorized) return auth.response;
+
   const supabase = createAdminClient();
-  const { leadId, clientId } = await request.json();
+  const { leadId } = await request.json();
+  const clientId = auth.userId; // Use verified session user, not request body
 
   // Verify lead is published and belongs to client's niche
   const { data: lead } = await supabase
