@@ -1,8 +1,12 @@
+import { requireAdmin } from "@/lib/auth-guard";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // POST — assign a new niche to a client
 export async function POST(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const { clientId, companyId, templateId, name, geography, enabledSignals } = await request.json();
 
   const supabase = createAdminClient();
@@ -31,6 +35,9 @@ export async function POST(request: Request) {
 
 // PATCH — update an existing client niche (name, geography, signals, active status)
 export async function PATCH(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const { nicheId, name, geography, enabledSignals, isActive } = await request.json();
 
   if (!nicheId) {
@@ -59,6 +66,9 @@ export async function PATCH(request: Request) {
 
 // DELETE — remove a niche assignment from a client (template stays intact)
 export async function DELETE(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const { nicheId } = await request.json();
 
   if (!nicheId) {

@@ -1,8 +1,12 @@
+import { requireAdmin } from "@/lib/auth-guard";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // GET — list all users
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const supabase = createAdminClient();
   const { data, error } = await supabase.auth.admin.listUsers();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -39,7 +43,11 @@ export async function GET() {
 
 // POST — update, check_delete, delete, reset_password, confirm_email
 export async function POST(request: Request) {
-  const { action, userId, data, callerRole } = await request.json();
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
+  const { action, userId, data } = await request.json();
+  const callerRole = auth.role; // Use verified role from session, not request body
   const supabase = createAdminClient();
 
   switch (action) {

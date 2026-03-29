@@ -1,8 +1,12 @@
+import { requireAdmin } from "@/lib/auth-guard";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail, newLeadsEmail, disputeResolvedEmail } from "@/lib/email";
 
 export async function POST(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const { leadId, status, adminNotes } = await request.json();
 
   if (!leadId || !status) {

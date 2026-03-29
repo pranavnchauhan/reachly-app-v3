@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/lib/auth-fetch";
 
 import { useState } from "react";
 import {
@@ -126,7 +127,7 @@ export function NicheEditor({ template, clientNiches }: {
     setSaving(true);
     setSaved(false);
 
-    const res = await fetch("/api/admin/update-niche-template", {
+    const res = await authFetch("/api/admin/update-niche-template", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

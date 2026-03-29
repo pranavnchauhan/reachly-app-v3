@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/lib/auth-fetch";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -47,7 +48,7 @@ export default function UsersPage() {
 
   async function loadUsers() {
     setLoading(true);
-    const res = await fetch("/api/admin/users");
+    const res = await authFetch("/api/admin/users");
     if (res.ok) {
       const data = await res.json();
       setUsers(data.users);
@@ -59,7 +60,7 @@ export default function UsersPage() {
 
   async function handleAction(action: string, userId: string, data?: Record<string, unknown>) {
     setMessage(null);
-    const res = await fetch("/api/admin/users", {
+    const res = await authFetch("/api/admin/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, userId, data, callerRole: currentUserRole }),
@@ -83,7 +84,7 @@ export default function UsersPage() {
 
   async function handleLifecycle(action: string, userId: string) {
     setMessage(null);
-    const res = await fetch("/api/admin/account-lifecycle", {
+    const res = await authFetch("/api/admin/account-lifecycle", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, userId, callerRole: currentUserRole, callerId: null }),
@@ -103,7 +104,7 @@ export default function UsersPage() {
   }
 
   async function handleExport(user: UserData) {
-    const res = await fetch("/api/admin/account-lifecycle", {
+    const res = await authFetch("/api/admin/account-lifecycle", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "export", userId: user.id }),
@@ -127,7 +128,7 @@ export default function UsersPage() {
       return;
     }
 
-    const checkRes = await fetch("/api/admin/users", {
+    const checkRes = await authFetch("/api/admin/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "check_delete", userId: user.id }),

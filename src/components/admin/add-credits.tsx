@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/lib/auth-fetch";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -44,7 +45,7 @@ export function AddCredits({
     e.preventDefault();
     setLoading(true);
 
-    const res = await fetch("/api/admin/add-credits", {
+    const res = await authFetch("/api/admin/add-credits", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

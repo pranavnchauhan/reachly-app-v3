@@ -1,9 +1,13 @@
+import { requireAdmin } from "@/lib/auth-guard";
 import { NextResponse } from "next/server";
 import { safeFetchJson } from "@/lib/pipeline/safe-fetch";
 
 // POST: Search Apollo for alternative contacts at a company
 // Returns top candidates for admin to choose from
 export async function POST(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const { companyName, companyDomain } = await request.json();
 
   if (!companyName && !companyDomain) {
@@ -57,6 +61,9 @@ export async function POST(request: Request) {
 
 // PATCH: Enrich a specific candidate (costs 1 Apollo credit)
 export async function PATCH(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const { candidateId } = await request.json();
 
   if (!candidateId) {

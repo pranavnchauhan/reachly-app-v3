@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/lib/auth-fetch";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -12,7 +13,7 @@ export function ClientActions({ companyId, companyName }: { companyId: string; c
 
   async function handleDelete() {
     setDeleting(true);
-    const res = await fetch("/api/admin/delete-company", {
+    const res = await authFetch("/api/admin/delete-company", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ companyId }),

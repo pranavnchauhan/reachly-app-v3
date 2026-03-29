@@ -1,8 +1,13 @@
+import { requireAdmin } from "@/lib/auth-guard";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: Request) {
-  const { action, userId, callerRole, callerId } = await request.json();
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
+  const { action, userId } = await request.json();
+  const callerRole = auth.role; // Use verified role from session, not request body
   const supabase = createAdminClient();
 
   switch (action) {
@@ -35,7 +40,7 @@ export async function POST(request: Request) {
         account_status: "archived",
         archived_at: new Date().toISOString(),
         archive_expires_at: expiresAt.toISOString(),
-        archived_by: callerId || null,
+        archived_by: auth.userId || null,
       }).eq("id", userId);
 
       return NextResponse.json({

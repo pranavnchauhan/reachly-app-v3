@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/lib/auth-fetch";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -46,7 +47,7 @@ export default function NewClientPage() {
     setAbnError("");
     setSearchResults([]);
 
-    const res = await fetch(`/api/admin/abn-lookup?name=${encodeURIComponent(searchQuery.trim())}`);
+    const res = await authFetch(`/api/admin/abn-lookup?name=${encodeURIComponent(searchQuery.trim())}`);
     const data = await res.json();
 
     if (res.ok && data.results?.length > 0) {
@@ -64,7 +65,7 @@ export default function NewClientPage() {
 
     // Now do a full ABN lookup to get all details
     setAbnLoading(true);
-    const res = await fetch(`/api/admin/abn-lookup?abn=${result.abn}`);
+    const res = await authFetch(`/api/admin/abn-lookup?abn=${result.abn}`);
     const data = await res.json();
 
     if (res.ok) {
@@ -87,7 +88,7 @@ export default function NewClientPage() {
     setAbnLoading(true);
     setAbnError("");
 
-    const res = await fetch(`/api/admin/abn-lookup?abn=${cleanAbn}`);
+    const res = await authFetch(`/api/admin/abn-lookup?abn=${cleanAbn}`);
     const data = await res.json();
 
     if (!res.ok) {
@@ -109,7 +110,7 @@ export default function NewClientPage() {
     setScraping(true);
     setScraped(false);
 
-    const res = await fetch(`/api/admin/scrape-website?url=${encodeURIComponent(website.trim())}`);
+    const res = await authFetch(`/api/admin/scrape-website?url=${encodeURIComponent(website.trim())}`);
     const data = await res.json();
 
     if (res.ok) {
@@ -147,7 +148,7 @@ export default function NewClientPage() {
     setLoading(true);
     setError("");
 
-    const res = await fetch("/api/admin/create-company", {
+    const res = await authFetch("/api/admin/create-company", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

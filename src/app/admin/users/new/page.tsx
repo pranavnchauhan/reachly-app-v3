@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/lib/auth-fetch";
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -52,8 +53,8 @@ export default function NewUserPage() {
   useEffect(() => {
     async function load() {
       const [compRes, tmplRes] = await Promise.all([
-        fetch("/api/admin/list-companies"),
-        fetch("/api/admin/list-templates"),
+        authFetch("/api/admin/list-companies"),
+        authFetch("/api/admin/list-templates"),
       ]);
       if (compRes.ok) {
         const data = await compRes.json();
@@ -76,7 +77,7 @@ export default function NewUserPage() {
     setLoading(true);
     setError("");
 
-    const res = await fetch("/api/admin/onboard-client", {
+    const res = await authFetch("/api/admin/onboard-client", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

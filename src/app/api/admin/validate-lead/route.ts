@@ -1,9 +1,13 @@
+import { requireAdmin } from "@/lib/auth-guard";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail, newLeadsEmail } from "@/lib/email";
 
 // POST: Validate, assign to client, or reject a lead — with audit trail
 export async function POST(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const body = await request.json();
   const { leadId, action, clientNicheId, contactOverride, rejectionReason } = body as {
     leadId: string;

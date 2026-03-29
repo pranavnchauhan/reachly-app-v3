@@ -1,8 +1,12 @@
+import { requireAdmin } from "@/lib/auth-guard";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Signal } from "@/types/database";
 
 export async function POST(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const {
     fullName, email, companyId, companyName, phone, position, role,
     templateId, nicheName, geography,

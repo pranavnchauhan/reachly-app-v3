@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/lib/auth-fetch";
 
 import { useState } from "react";
 import {
@@ -60,7 +61,7 @@ export function DisputeReview({ initialDisputes }: { initialDisputes: Dispute[] 
 
     const notes = adminNotes[disputeId] || "";
 
-    const res = await fetch("/api/admin/resolve-dispute", {
+    const res = await authFetch("/api/admin/resolve-dispute", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

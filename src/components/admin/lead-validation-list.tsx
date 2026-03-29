@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/lib/auth-fetch";
 
 import { useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -83,7 +84,7 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
 
   const validateLead = useCallback(async (id: string) => {
     setActionLoading(id);
-    const res = await fetch("/api/admin/validate-lead", {
+    const res = await authFetch("/api/admin/validate-lead", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ leadId: id, action: "validate" }),
@@ -97,7 +98,7 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
 
   const publishLead = useCallback(async (id: string, clientNicheId: string, contactOverride?: Record<string, unknown>) => {
     setActionLoading(id);
-    const res = await fetch("/api/admin/validate-lead", {
+    const res = await authFetch("/api/admin/validate-lead", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ leadId: id, action: "publish", clientNicheId, contactOverride }),
@@ -113,7 +114,7 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
   const rejectLead = useCallback(async (id: string) => {
     if (!confirm("Reject this lead? It will be archived.")) return;
     setActionLoading(id);
-    const res = await fetch("/api/admin/validate-lead", {
+    const res = await authFetch("/api/admin/validate-lead", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ leadId: id, action: "reject" }),
@@ -128,7 +129,7 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
   // Fetch client recommendations for a lead
   const fetchRecommendations = useCallback(async (templateId: string) => {
     setLoadingRecs(true);
-    const res = await fetch(`/api/admin/lead-recommendations?templateId=${templateId}`);
+    const res = await authFetch(`/api/admin/lead-recommendations?templateId=${templateId}`);
     if (res.ok) {
       const data = await res.json();
       setRecommendations(data.recommendations || []);
@@ -140,7 +141,7 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
   const verifyContact = useCallback(async (companyName: string, companyDomain: string | null) => {
     setLoadingCandidates(true);
     setCandidates([]);
-    const res = await fetch("/api/admin/verify-contact", {
+    const res = await authFetch("/api/admin/verify-contact", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ companyName, companyDomain: companyDomain?.replace(/^https?:\/\//, "") }),
@@ -155,7 +156,7 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
   // Enrich a candidate and update the lead
   const enrichCandidate = useCallback(async (candidateId: string, leadId: string) => {
     setEnrichingId(candidateId);
-    const res = await fetch("/api/admin/verify-contact", {
+    const res = await authFetch("/api/admin/verify-contact", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ candidateId }),

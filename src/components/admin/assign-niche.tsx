@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/lib/auth-fetch";
 
 import { useState } from "react";
 import {
@@ -105,7 +106,7 @@ export function AssignNiche({
     setLoading(true);
     setError("");
 
-    const res = await fetch("/api/admin/assign-niche", {
+    const res = await authFetch("/api/admin/assign-niche", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -134,7 +135,7 @@ export function AssignNiche({
 
   async function handleUpdate(nicheId: string) {
     setLoading(true);
-    const res = await fetch("/api/admin/assign-niche", {
+    const res = await authFetch("/api/admin/assign-niche", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -162,7 +163,7 @@ export function AssignNiche({
     const prev = niches;
     setNiches(niches.filter((n) => n.id !== nicheId));
 
-    const res = await fetch("/api/admin/assign-niche", {
+    const res = await authFetch("/api/admin/assign-niche", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nicheId }),
@@ -180,7 +181,7 @@ export function AssignNiche({
     // Optimistic update
     setNiches(niches.map((n) => n.id === nicheId ? { ...n, is_active: !currentActive } : n));
 
-    await fetch("/api/admin/assign-niche", {
+    await authFetch("/api/admin/assign-niche", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nicheId, isActive: !currentActive }),

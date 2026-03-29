@@ -1,4 +1,5 @@
 "use client";
+import { authFetch } from "@/lib/auth-fetch";
 
 import { useEffect, useState } from "react";
 import {
@@ -63,7 +64,7 @@ export default function OrphanedDataPage() {
 
   async function loadData() {
     setLoading(true);
-    const res = await fetch("/api/admin/orphaned-data");
+    const res = await authFetch("/api/admin/orphaned-data");
     if (res.ok) {
       const data = await res.json();
       setNiches(data.niches);
@@ -78,7 +79,7 @@ export default function OrphanedDataPage() {
 
   async function handleAction(action: string, body: Record<string, unknown>) {
     setMessage(null);
-    const res = await fetch("/api/admin/orphaned-data", {
+    const res = await authFetch("/api/admin/orphaned-data", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, ...body }),

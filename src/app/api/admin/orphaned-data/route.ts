@@ -1,8 +1,12 @@
+import { requireAdmin } from "@/lib/auth-guard";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // GET — list all orphaned data
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const supabase = createAdminClient();
 
   // Orphaned niches: client_id is null
@@ -73,6 +77,9 @@ export async function GET() {
 
 // POST — reassign, archive, or purge orphaned data
 export async function POST(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const { action, nicheId, nicheIds, userId, companyId } = await request.json();
   const supabase = createAdminClient();
 

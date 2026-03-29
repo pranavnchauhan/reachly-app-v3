@@ -1,9 +1,13 @@
+import { requireAdmin } from "@/lib/auth-guard";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // GET: Get client recommendations for assigning a lead
 // ?templateId=xxx — which master niche to find matching clients for
 export async function GET(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.authorized) return auth.response;
+
   const { searchParams } = new URL(request.url);
   const templateId = searchParams.get("templateId");
 
