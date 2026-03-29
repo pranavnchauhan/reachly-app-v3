@@ -2,7 +2,7 @@
 // Uses api_search (free) to find people, then people/match (paid credits) to get email/phone
 // Title-matching: loops through candidates until finding one matching target_titles
 
-import type { SignalResult } from "./find-signals";
+import type { SignalResult } from "./types";
 import { safeFetchJson } from "./safe-fetch";
 
 export interface EnrichedLead {

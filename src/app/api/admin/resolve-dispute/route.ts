@@ -37,7 +37,7 @@ export async function POST(request: Request) {
       .from("credit_packs")
       .select("id, total_credits, used_credits, expires_at")
       .or(companyId ? `client_id.eq.${clientId},company_id.eq.${companyId}` : `client_id.eq.${clientId}`)
-      .order("purchased_at", { ascending: false })
+      .order("purchased_at", { ascending: true }) // FIFO — refund to oldest pack first
       .limit(1);
 
     if (packs && packs.length > 0) {

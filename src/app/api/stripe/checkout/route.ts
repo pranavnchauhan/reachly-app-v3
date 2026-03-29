@@ -3,6 +3,7 @@ import { getStripe, CREDIT_PACKS } from "@/lib/stripe";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
+  try {
   const { packId } = await request.json();
 
   const pack = CREDIT_PACKS.find((p) => p.id === packId);
@@ -53,4 +54,8 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json({ url: session.url });
+  } catch (err) {
+    console.error("Stripe checkout error:", err);
+    return NextResponse.json({ error: "Failed to create checkout session" }, { status: 500 });
+  }
 }

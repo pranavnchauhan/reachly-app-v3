@@ -6,7 +6,7 @@ import { enrichContacts } from "@/lib/pipeline/enrich-contacts";
 import { deepResearch } from "@/lib/pipeline/deep-research";
 import { sendEmail } from "@/lib/email";
 import type { Signal } from "@/types/database";
-import type { SignalResult } from "@/lib/pipeline/find-signals";
+import type { SignalResult } from "@/lib/pipeline/types";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@reachly.com.au";

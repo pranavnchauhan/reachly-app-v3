@@ -74,10 +74,15 @@ export async function POST(request: Request) {
 
   // 4. Add initial credits (if any)
   if (initialCredits && initialCredits > 0) {
+    // Onboarding credits expire in 4 months (same as Pilot pack)
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + 4);
+
     const { data: pack } = await supabase.from("credit_packs").insert({
       client_id: userId,
       total_credits: initialCredits,
       used_credits: 0,
+      expires_at: expiresAt.toISOString(),
     }).select().single();
 
     if (pack) {

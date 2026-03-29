@@ -5,7 +5,7 @@ import { discoverSignals } from "@/lib/pipeline/discover-signals";
 import { enrichContacts } from "@/lib/pipeline/enrich-contacts";
 import { deepResearch } from "@/lib/pipeline/deep-research";
 import type { Signal } from "@/types/database";
-import type { SignalResult } from "@/lib/pipeline/find-signals";
+import type { SignalResult } from "@/lib/pipeline/types";
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -286,18 +286,4 @@ async function executePipeline(runId: string, nicheId: string | null) {
     console.error("Pipeline error:", error);
     await failRun(String(error));
   }
-}
-
-// ─── GET: Cron handler ──────────────────────────────────────────────
-export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization");
-  if (!CRON_SECRET || authHeader !== `Bearer ${CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  return POST(new Request(request.url, {
-    method: "POST",
-    headers: { authorization: authHeader || "" },
-    body: JSON.stringify({ secret: CRON_SECRET }),
-  }));
 }
