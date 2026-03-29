@@ -81,16 +81,27 @@ export async function POST(request: Request) {
     }, { status: 402 });
   }
 
-  // Deduct credit and reveal lead
-  const [leadUpdate, creditUpdate, txInsert] = await Promise.all([
+  // Deduct credit atomically — use conditional update to prevent double-spend
+  // The WHERE clause ensures used_credits hasn't changed since we read it
+  const { data: creditResult, error: creditError } = await supabase
+    .from("credit_packs")
+    .update({ used_credits: activePack.used_credits + 1 })
+    .eq("id", activePack.id)
+    .eq("used_credits", activePack.used_credits) // Optimistic lock
+    .select("id")
+    .single();
+
+  if (creditError || !creditResult) {
+    // Another request already used this credit — retry or fail
+    return NextResponse.json({ error: "Credit already used. Please try again." }, { status: 409 });
+  }
+
+  // Credit locked — now reveal lead and log transaction
+  const [leadUpdate, txInsert] = await Promise.all([
     supabase.from("leads").update({
       status: "revealed",
       revealed_at: new Date().toISOString(),
     }).eq("id", leadId),
-
-    supabase.from("credit_packs").update({
-      used_credits: activePack.used_credits + 1,
-    }).eq("id", activePack.id),
 
     supabase.from("credit_transactions").insert({
       company_id: activePack.company_id || companyId || null,
@@ -103,7 +114,7 @@ export async function POST(request: Request) {
     }),
   ]);
 
-  if (leadUpdate.error || creditUpdate.error || txInsert.error) {
+  if (leadUpdate.error || txInsert.error) {
     return NextResponse.json({ error: "Failed to reveal lead" }, { status: 500 });
   }
 

@@ -43,18 +43,19 @@ export async function POST(request: Request) {
     if (packs && packs.length > 0) {
       const pack = packs[0];
 
-      // If pack has used credits, reduce used_credits (refund)
+      // Atomic refund with optimistic lock
       if (pack.used_credits > 0) {
         await supabase
           .from("credit_packs")
           .update({ used_credits: pack.used_credits - 1 })
-          .eq("id", pack.id);
+          .eq("id", pack.id)
+          .eq("used_credits", pack.used_credits); // Optimistic lock
       } else {
-        // No used credits to reverse — add 1 to total instead
         await supabase
           .from("credit_packs")
           .update({ total_credits: pack.total_credits + 1 })
-          .eq("id", pack.id);
+          .eq("id", pack.id)
+          .eq("total_credits", pack.total_credits); // Optimistic lock
       }
 
       // Log refund transaction

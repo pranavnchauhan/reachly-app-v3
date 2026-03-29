@@ -12,10 +12,35 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "url parameter required" }, { status: 400 });
   }
 
-  // Normalize URL
+  // Normalize and validate URL — prevent SSRF
   let baseUrl = url;
   if (!baseUrl.startsWith("http")) baseUrl = `https://${baseUrl}`;
   baseUrl = baseUrl.replace(/\/+$/, "");
+
+  try {
+    const parsed = new URL(baseUrl);
+    // Only allow https (or http for local dev)
+    if (!["https:", "http:"].includes(parsed.protocol)) {
+      return NextResponse.json({ error: "Only HTTP/HTTPS URLs allowed" }, { status: 400 });
+    }
+    // Block private/internal IPs
+    const host = parsed.hostname;
+    if (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host.startsWith("10.") ||
+      host.startsWith("172.") ||
+      host.startsWith("192.168.") ||
+      host.startsWith("169.254.") ||
+      host === "0.0.0.0" ||
+      host.endsWith(".internal") ||
+      host.endsWith(".local")
+    ) {
+      return NextResponse.json({ error: "Internal URLs not allowed" }, { status: 400 });
+    }
+  } catch {
+    return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+  }
 
   const result: Record<string, string | null> = {
     email: null,
