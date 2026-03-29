@@ -94,41 +94,22 @@ async function searchNewsForSignal(
 ): Promise<DiscoveredCompany[]> {
   const searchDescription = NEWS_SEARCH_HINTS[signal.name] || signal.description;
 
-  const prompt = `Find Australian companies that have recently been in the news for: ${searchDescription}
+  const prompt = `List Australian companies that have been in business news recently for: ${searchDescription}
 
-Search verified news articles, press releases, and business publications from the last 60 days (e.g. AFR, SMH, The Australian, ABC News, SmartCompany, Business News Australia, industry publications).
+Include companies from news articles, press releases, financial publications, and industry reports.
 
-Prefer mid-market companies and founder-led businesses, but include any company with a genuine, recent event.
-
-For each company found, provide:
+For each company, provide:
 - Company name
-- Their website domain (if known)
-- The specific event or evidence from the news
-- The source URL where you found this
-- How confident you are (0.0 to 1.0)
+- Website domain
+- What happened (the specific event)
+- A URL where this was reported
+- Your confidence (0.0 to 1.0)
 
-RULES:
-- Companies must be headquartered in ${geography} or have major operations there
-- Only cite real, verifiable news — no blogs or generic articles
-- Only include companies where something SPECIFIC and RECENT happened
-- Do NOT include universities, TAFEs, schools, or government agencies
+Companies must be based in ${geography} or have major operations there.
+Do NOT include universities, schools, or government agencies.
 
-Respond in this exact JSON format:
-{
-  "companies": [
-    {
-      "name": "Company Name",
-      "domain": "company.com",
-      "industry": "Industry",
-      "location": "City, State, Australia",
-      "evidence": "Specific event from the news",
-      "source_url": "https://source-url.com/article",
-      "confidence": 0.85
-    }
-  ]
-}
-
-If no companies match, respond with: {"companies": []}`;
+Return JSON only:
+{"companies": [{"name": "Company", "domain": "company.com", "industry": "X", "location": "City, State, Australia", "evidence": "What happened", "source_url": "https://...", "confidence": 0.8}]}`;
 
   const { ok, data } = await safeFetchJson(
     "https://api.perplexity.ai/chat/completions",
@@ -143,7 +124,7 @@ If no companies match, respond with: {"companies": []}`;
         messages: [
           {
             role: "system",
-            content: "You are a B2B market intelligence analyst. Only cite verified news sources. Respond only with valid JSON.",
+            content: "You are a B2B market intelligence analyst. Respond only with valid JSON. No markdown, no explanation.",
           },
           { role: "user", content: prompt },
         ],
