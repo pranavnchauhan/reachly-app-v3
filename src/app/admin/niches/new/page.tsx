@@ -60,7 +60,6 @@ export default function NewNicheTemplatePage() {
 
   function addEmailTemplate() {
     setEmailTemplates([...emailTemplates, {
-      id: crypto.randomUUID(),
       approach: "",
       subject: "",
       body: "",
@@ -271,7 +270,7 @@ export default function NewNicheTemplatePage() {
           </div>
 
           {emailTemplates.map((tmpl, i) => (
-            <div key={tmpl.id} className="border border-border rounded-lg p-4 space-y-3">
+            <div key={i} className="border border-border rounded-lg p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Template {i + 1}</span>
                 <button type="button" onClick={() => removeEmailTemplate(i)} className="text-danger hover:text-danger/80">

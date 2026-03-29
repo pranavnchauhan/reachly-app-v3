@@ -1,7 +1,7 @@
 import { requireAdmin } from "@/lib/auth-guard";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendEmail, newLeadsEmail, disputeResolvedEmail } from "@/lib/email";
+import { sendEmail, newLeadsEmail } from "@/lib/email";
 
 export async function POST(request: Request) {
   const auth = await requireAdmin(request);
@@ -29,11 +29,11 @@ export async function POST(request: Request) {
   // Get lead + client info for notifications
   const { data: lead } = await supabase
     .from("leads")
-    .select("company_name, client_niches!inner(client_id)")
+    .select("company_name, client_niche_id, client_niches!inner(client_id)")
     .eq("id", leadId)
     .single();
 
-  if (lead) {
+  if (lead && status === "published") {
     const clientId = (lead.client_niches as unknown as { client_id: string }).client_id;
     const { data: profile } = await supabase
       .from("profiles")
@@ -44,34 +44,15 @@ export async function POST(request: Request) {
     if (profile) {
       const firstName = profile.full_name.split(" ")[0];
 
-      // New lead published → notify client
-      if (status === "published") {
-        // Count total unpublished leads for this client to batch the notification
-        const { count } = await supabase
-          .from("leads")
-          .select("*", { count: "exact", head: true })
-          .eq("status", "published")
-          .eq("client_niche_id", (lead.client_niches as unknown as { id: string }).id || "");
+      // Count published leads for this client's niche
+      const { count } = await supabase
+        .from("leads")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "published")
+        .eq("client_niche_id", lead.client_niche_id);
 
-        // Fire and forget — don't block the response
-        const email = newLeadsEmail(firstName, count ?? 1);
-        sendEmail({ to: profile.email, toName: profile.full_name, ...email }).catch(() => {});
-      }
-
-      // Dispute resolved → notify client
-      if (status === "approved" || status === "rejected") {
-        const email = disputeResolvedEmail(firstName, lead.company_name, status, adminNotes || null);
-        sendEmail({ to: profile.email, toName: profile.full_name, ...email }).catch(() => {});
-
-        // If approved, refund credit
-        if (status === "approved") {
-          // Update dispute record
-          await supabase
-            .from("disputes")
-            .update({ status: "approved", admin_notes: adminNotes || null, resolved_at: new Date().toISOString() })
-            .eq("lead_id", leadId);
-        }
-      }
+      const email = newLeadsEmail(firstName, count ?? 1);
+      sendEmail({ to: profile.email, toName: profile.full_name, ...email }).catch(() => {});
     }
   }
 

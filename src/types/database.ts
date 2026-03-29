@@ -33,13 +33,12 @@ export interface Signal {
 }
 
 export interface EmailTemplate {
-  id: string;
   approach: string;
   subject: string;
   body: string;
 }
 
-export type LeadSource = "perplexity" | "apollo";
+export type LeadSource = "perplexity";
 
 export interface MatchedSignal {
   signal_id: string;
@@ -55,11 +54,8 @@ export interface ApproachStrategy {
   talking_points: string[];
 }
 
-export interface GeneratedEmail {
-  approach: string;
-  subject: string;
-  body: string;
-}
+// Alias — pipeline uses GeneratedEmail, niche editor uses EmailTemplate (same shape)
+export type GeneratedEmail = EmailTemplate;
 
 export interface Profile {
   id: string;

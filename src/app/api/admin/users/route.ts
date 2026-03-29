@@ -225,7 +225,7 @@ export async function POST(request: Request) {
       const { error } = await supabase.auth.admin.deleteUser(userId);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-      console.log(`[AUDIT] User deleted: ${targetProfile?.full_name} (${targetProfile?.email}) | company_id: ${companyId} | peers: ${hasCompanyPeers} | by ${callerRole} at ${new Date().toISOString()}`);
+      console.log(`[AUDIT] User deleted: ${userId} | by ${callerRole} at ${new Date().toISOString()}`);
 
       return NextResponse.json({ success: true });
     }

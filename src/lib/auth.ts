@@ -20,6 +20,14 @@ export const getUser = cache(async () => {
 
   if (profile) return profile;
 
+  // Only auto-provision if user was created through admin onboarding
+  // (onboard-client sets user_metadata.onboarded = true)
+  if (!user.user_metadata?.onboarded) {
+    console.warn(`Unauthorized sign-in attempt: ${user.email} — no profile, not onboarded`);
+    await supabase.auth.signOut();
+    redirect("/auth/login?error=not_invited");
+  }
+
   const { data: newProfile, error: insertError } = await adminClient
     .from("profiles")
     .insert({

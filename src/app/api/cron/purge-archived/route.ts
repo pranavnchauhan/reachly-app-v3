@@ -46,7 +46,7 @@ export async function GET(request: Request) {
         }
       }
 
-      console.log(`[PURGE] Account: ${profile.full_name} (${profile.email})`);
+      console.log(`[PURGE] Account purged: ${profile.id}`);
       purgedAccounts++;
     } catch (err) {
       console.error(`[PURGE] Failed account ${profile.email}:`, err);
@@ -66,7 +66,7 @@ export async function GET(request: Request) {
       await supabase.from("signal_requests").delete().eq("client_niche_id", niche.id);
       await supabase.from("client_niches").delete().eq("id", niche.id);
 
-      console.log(`[PURGE] Orphaned niche: ${niche.name}`);
+      console.log(`[PURGE] Orphaned niche purged: ${niche.id}`);
       purgedNiches++;
     } catch (err) {
       console.error(`[PURGE] Failed niche ${niche.name}:`, err);

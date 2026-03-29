@@ -172,7 +172,7 @@ export async function POST(request: Request) {
 
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-      console.log(`[AUDIT] HARD DELETE: user ${userId} | company: ${companyId} (${hasCompanyPeers ? "kept" : "deleted"}) | by ${callerRole} at ${new Date().toISOString()}`);
+      console.log(`[AUDIT] HARD DELETE: user ${userId} | by ${callerRole} at ${new Date().toISOString()}`);
       return NextResponse.json({ success: true, permanently_deleted: true });
     }
 

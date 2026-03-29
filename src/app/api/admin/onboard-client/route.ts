@@ -30,6 +30,7 @@ export async function POST(request: Request) {
       full_name: fullName,
       company_name: companyName,
       position: position || null,
+      onboarded: true,
     },
   });
 

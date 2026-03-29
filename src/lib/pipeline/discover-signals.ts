@@ -261,7 +261,7 @@ async function verifySourceUrl(url: string, companyName: string, evidence: strin
 
     return { companyFound, evidenceFound };
   } catch {
-    // Network error — give benefit of the doubt
-    return { companyFound: true, evidenceFound: false };
+    // Network error — fail closed, don't trust unverifiable sources
+    return { companyFound: false, evidenceFound: false };
   }
 }
