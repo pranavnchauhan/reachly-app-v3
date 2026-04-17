@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   Check, X, Eye, Mail, Linkedin, Globe, Phone, Building2, MapPin,
   Flame, ExternalLink, ChevronRight, Search, Users, RefreshCw, Star, ArrowRight,
+  Pencil, ShieldCheck, Clock, Trash2,
 } from "lucide-react";
 import type { MatchedSignal, ApproachStrategy, GeneratedEmail } from "@/types/database";
 
@@ -26,6 +27,9 @@ interface Lead {
   justification: string;
   approach_strategies: ApproachStrategy[];
   email_templates: GeneratedEmail[];
+  abn: string | null;
+  abn_status: string | null;
+  gst_registered: boolean;
   status: string;
   discovered_at: string;
   niche_template_id: string | null;
@@ -79,6 +83,11 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
   const [enrichingId, setEnrichingId] = useState<string | null>(null);
 
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // ABN edit state
+  const [editingAbn, setEditingAbn] = useState(false);
+  const [abnInput, setAbnInput] = useState("");
+  const [abnLoading, setAbnLoading] = useState(false);
 
   // ─── Actions ──────────────────────────────────────────────────────
 
@@ -174,6 +183,61 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
     setEnrichingId(null);
   }, [selectedLead]);
 
+  // Save ABN for a lead
+  const saveAbn = useCallback(async (leadId: string, abn: string) => {
+    setAbnLoading(true);
+    const res = await authFetch("/api/admin/update-abn", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ leadId, abn: abn || null }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setLeads((prev) => prev.map((l) => l.id === leadId ? { ...l, abn: data.abn, abn_status: data.abn_status, gst_registered: data.gst_registered } : l));
+      if (selectedLead?.id === leadId) {
+        setSelectedLead((prev) => prev ? { ...prev, abn: data.abn, abn_status: data.abn_status, gst_registered: data.gst_registered } : null);
+      }
+      setEditingAbn(false);
+      setAbnInput("");
+    }
+    setAbnLoading(false);
+  }, [selectedLead]);
+
+  // ─── Purge test leads ─────────────────────────────────────────────
+
+  const [purging, setPurging] = useState(false);
+
+  const purgeDiscoveredLeads = useCallback(async () => {
+    const count = leads.filter((l) => l.status === "discovered").length;
+    if (!confirm(`Delete all ${count} discovered leads? This cannot be undone.`)) return;
+    setPurging(true);
+    const supabase = createClient();
+    const ids = leads.filter((l) => l.status === "discovered").map((l) => l.id);
+    const { error } = await supabase.from("leads").delete().in("id", ids);
+    if (!error) {
+      setLeads((prev) => prev.filter((l) => l.status !== "discovered"));
+      setSelectedLead(null);
+    } else {
+      alert("Failed to purge: " + error.message);
+    }
+    setPurging(false);
+  }, [leads]);
+
+  // ─── Helpers ─────────────────────────────────────────────────────
+
+  function timeAgo(dateStr: string): string {
+    const now = Date.now();
+    const then = new Date(dateStr).getTime();
+    const diffMs = now - then;
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days === 1) return "1d ago";
+    return `${days}d ago`;
+  }
+
   // ─── Filtering ────────────────────────────────────────────────────
 
   const nicheNames = [...new Set(leads.map((l) => l.niche_templates?.name || "Unknown"))];
@@ -189,6 +253,8 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
   const selectLead = (lead: Lead) => {
     setSelectedLead(lead);
     setCandidates([]);
+    setEditingAbn(false);
+    setAbnInput("");
     if (lead.niche_template_id) {
       fetchRecommendations(lead.niche_template_id);
     }
@@ -215,11 +281,23 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
             </select>
           )}
         </div>
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
-          <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary w-48"
-            placeholder="Search leads..." />
+        <div className="flex items-center gap-2">
+          {leads.some((l) => l.status === "discovered") && (
+            <button
+              onClick={purgeDiscoveredLeads}
+              disabled={purging}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-danger/30 text-danger hover:bg-danger/10 transition-colors disabled:opacity-50"
+            >
+              <Trash2 className="w-3 h-3" />
+              {purging ? "Purging..." : "Purge Discovered"}
+            </button>
+          )}
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+            <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 pr-3 py-1.5 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary w-48"
+              placeholder="Search leads..." />
+          </div>
         </div>
       </div>
 
@@ -258,14 +336,37 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
                     <span key={i} className="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full">{s.signal_name}</span>
                   ))}
                 </div>
-                <div className="flex items-center gap-2 mt-2 text-muted">
-                  {lead.contact_email && <Mail className="w-3 h-3 text-success" />}
-                  {lead.contact_phone && <Phone className="w-3 h-3 text-success" />}
-                  {lead.contact_linkedin && <Linkedin className="w-3 h-3 text-success" />}
+                <div className="flex items-center justify-between mt-2">
+                  <div className="flex items-center gap-2 text-muted">
+                    {lead.contact_email && <Mail className="w-3 h-3 text-success" />}
+                    {lead.contact_phone && <Phone className="w-3 h-3 text-success" />}
+                    {lead.contact_linkedin && <Linkedin className="w-3 h-3 text-success" />}
+                  </div>
+                  <span className="text-[10px] text-muted flex items-center gap-0.5">
+                    <Clock className="w-2.5 h-2.5" /> {timeAgo(lead.discovered_at)}
+                  </span>
                 </div>
                 {lead.niche_templates && (
                   <p className="text-[10px] text-primary/70 mt-2 font-medium">{lead.niche_templates.name}</p>
                 )}
+                <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-border/50">
+                  {lead.status === "discovered" && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); validateLead(lead.id); }}
+                      disabled={actionLoading === lead.id}
+                      className="flex items-center gap-1 px-2 py-1 rounded-md bg-success/10 text-success text-[10px] font-medium hover:bg-success/20 transition-colors disabled:opacity-50"
+                    >
+                      <Check className="w-2.5 h-2.5" /> Validate
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); rejectLead(lead.id); }}
+                    disabled={actionLoading === lead.id}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md bg-danger/10 text-danger text-[10px] font-medium hover:bg-danger/20 transition-colors disabled:opacity-50"
+                  >
+                    <X className="w-2.5 h-2.5" /> Reject
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -298,6 +399,43 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
 
                 <h2 className="text-xl font-bold">{selectedLead.company_name}</h2>
                 <p className="text-sm text-muted mt-1">{selectedLead.contact_name} — {selectedLead.contact_title}</p>
+
+                {/* ABN Badge */}
+                <div className="flex items-center gap-2 mt-2">
+                  {selectedLead.abn ? (
+                    <span className="text-[10px] font-medium bg-success/10 text-success px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3" /> ABN {selectedLead.abn} ({selectedLead.abn_status})
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-medium bg-warning/10 text-warning px-2 py-0.5 rounded-full">
+                      ABN not verified
+                    </span>
+                  )}
+                  <button
+                    onClick={() => { setEditingAbn(true); setAbnInput(selectedLead.abn || ""); }}
+                    className="text-[10px] text-primary hover:underline flex items-center gap-0.5">
+                    <Pencil className="w-2.5 h-2.5" /> {selectedLead.abn ? "Edit" : "Add ABN"}
+                  </button>
+                </div>
+
+                {/* ABN Edit Inline */}
+                {editingAbn && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <input
+                      value={abnInput}
+                      onChange={(e) => setAbnInput(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                      placeholder="Enter 11-digit ABN"
+                      className="px-2 py-1 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary w-36"
+                    />
+                    <button
+                      onClick={() => saveAbn(selectedLead.id, abnInput)}
+                      disabled={abnLoading || (abnInput.length > 0 && abnInput.length !== 11)}
+                      className="px-2 py-1 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary-hover disabled:opacity-50">
+                      {abnLoading ? "Verifying..." : "Save"}
+                    </button>
+                    <button onClick={() => setEditingAbn(false)} className="text-xs text-muted hover:text-foreground">Cancel</button>
+                  </div>
+                )}
 
                 <div className="flex items-center gap-2 mt-4 flex-wrap">
                   {selectedLead.status === "discovered" && (
