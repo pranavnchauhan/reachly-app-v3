@@ -1,6 +1,6 @@
 // Step 1: Signal-first discovery — find companies in the news matching buying signals
-// Uses Perplexity to search verified news sources (last 60 days)
-// HOT-ONLY pipeline: only companies with verified news signals make it through
+// Uses Perplexity to search verified news sources (last 30 days)
+// HOT-ONLY pipeline: only companies with corroborated news signals make it through
 
 import type { Signal } from "@/types/database";
 import { safeFetchJson } from "./safe-fetch";
@@ -53,9 +53,23 @@ export async function discoverSignals(
     }
   }
 
+  // Per-source-URL dedup: max 2 companies per unique URL (keep highest confidence)
+  const bySourceUrl = new Map<string, DiscoveredCompany[]>();
+  for (const company of deduped.values()) {
+    if (!company.source_url) continue;
+    const urlKey = company.source_url.toLowerCase().split("?")[0];
+    const bucket = bySourceUrl.get(urlKey) || [];
+    bucket.push(company);
+    bySourceUrl.set(urlKey, bucket);
+  }
+  const urlCapped: DiscoveredCompany[] = [];
+  for (const bucket of bySourceUrl.values()) {
+    bucket.sort((a, b) => b.confidence - a.confidence);
+    urlCapped.push(...bucket.slice(0, 2));
+  }
+
   // Only keep companies with verified source URLs (hot leads)
-  const hotLeads = Array.from(deduped.values())
-    .filter((c) => c.source_url !== null)
+  const hotLeads = urlCapped
     .sort((a, b) => b.confidence - a.confidence);
 
   return hotLeads;
@@ -94,7 +108,7 @@ async function searchNewsForSignal(
 ): Promise<DiscoveredCompany[]> {
   const searchDescription = NEWS_SEARCH_HINTS[signal.name] || signal.description;
 
-  const prompt = `List Australian companies that have been in business news recently for: ${searchDescription}
+  const prompt = `List Australian companies that have been in business news in the last 30 days for: ${searchDescription}
 
 Include companies from news articles, press releases, financial publications, and industry reports.
 
@@ -163,24 +177,16 @@ Return JSON only:
     })
   );
 
-  // Verify source URLs — check company name AND evidence match the page content
-  const verified = await Promise.all(
+  // Corroborate each company — requires 2+ diverse, fresh, specific source URLs
+  const corroborated = await Promise.all(
     companies.map(async (company: DiscoveredCompany) => {
-      if (!company.source_url) return { ...company, confidence: 0.2 }; // No URL = very low confidence
-      const verification = await verifySourceUrl(company.source_url, company.name, company.evidence);
-      if (!verification.companyFound) {
-        console.warn(`Source URL rejected for ${company.name}: ${company.source_url} — company not mentioned`);
-        return { ...company, source_url: null, confidence: 0.2 };
-      }
-      // Bonus confidence if evidence is also confirmed on page
-      const conf = verification.evidenceFound
-        ? Math.min(1, company.confidence + 0.05)
-        : company.confidence;
-      return { ...company, confidence: conf };
+      const { passed, bestUrl } = await corroborateCompany(company, apiKey);
+      if (!passed) return null;
+      return { ...company, source_url: bestUrl };
     })
   );
 
-  return verified;
+  return corroborated.filter((c): c is DiscoveredCompany => c !== null);
 }
 
 // ─── Entity filter — block universities, government, mega-corps ──────
@@ -199,18 +205,179 @@ const EXCLUDED_PATTERNS = [
   /\bFortescue\b/i, /\bQantas\b/i, /\bTransurban\b/i, /\bSuncorp\b/i,
   /\bOrigin Energy\b/i, /\bSantos\b/i, /\bInsurance Australia\b/i,
   /\bAtlassian\b/i, /\bCanva\b/i, /\bAfterpay\b/i, /\bBlock\b/i,
+  // Additional large enterprises and government bodies
+  /\baustralia post\b/i, /\bauspost\b/i,
+  /\bvirgin australia\b/i,
+  /\bnews corp\b/i, /\bnewscorp\b/i,
+  /\baustralian broadcasting\b/i, /\bABC\b/, /\bSBS\b/,
+  /\bairservices\b/i,
+  /\bnbn co\b/i, /\bnbn\b/i,
+  /\bsynergy\b/i, /\bwater corporation\b/i,
+  /\bvicroads\b/i, /\btransport for nsw\b/i,
 ];
 
 export function isExcludedEntity(name: string): boolean {
   return EXCLUDED_PATTERNS.some((pattern) => pattern.test(name));
 }
 
+// ─── Listing page detection ──────────────────────────────────────────
+
+function isListingPage(url: string): boolean {
+  const listingPatterns = [
+    /\/category\//i,
+    /\/categories\//i,
+    /\/tag\//i,
+    /\/tags\//i,
+    /\/topic\//i,
+    /\/topics\//i,
+    /\/industry\//i,
+    /\/industries\//i,
+    /\/search\//i,
+    /\/news\/industry\//i,
+    /\/news\/sector\//i,
+    /\/author\//i,
+    /\/page\/\d+/i,
+    /[?&](category|tag|topic|industry|sector|q)=/i,
+  ];
+  try {
+    const path = new URL(url).pathname + new URL(url).search;
+    return listingPatterns.some((p) => p.test(path));
+  } catch {
+    return false;
+  }
+}
+
+// ─── Corroboration — require 2+ diverse fresh sources ────────────────
+
+async function corroborateCompany(
+  company: DiscoveredCompany,
+  apiKey: string
+): Promise<{ passed: boolean; bestUrl: string | null }> {
+  const THIRTY_DAYS_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  // Helper: validate a single URL against all gates
+  async function validateUrl(url: string): Promise<{ valid: boolean; keywordMatchCount: number }> {
+    if (isListingPage(url)) {
+      console.warn(`[corroborate] Listing page rejected: ${url}`);
+      return { valid: false, keywordMatchCount: 0 };
+    }
+    const result = await verifySourceUrl(url, company.name, company.evidence);
+    if (!result.companyFound || !result.evidenceFound) {
+      console.warn(`[corroborate] Verification failed for ${company.name}: ${url}`);
+      return { valid: false, keywordMatchCount: 0 };
+    }
+    if (!result.publishedDate || result.publishedDate < THIRTY_DAYS_AGO) {
+      console.warn(`[corroborate] Stale or undated source for ${company.name}: ${url} (date: ${result.publishedDate?.toISOString() ?? "null"})`);
+      return { valid: false, keywordMatchCount: 0 };
+    }
+    return { valid: true, keywordMatchCount: result.keywordMatchCount };
+  }
+
+  // Step A: validate the original URL first
+  const originalResult = company.source_url
+    ? await validateUrl(company.source_url)
+    : { valid: false, keywordMatchCount: 0 };
+
+  const validUrls: Array<{ url: string; domain: string; keywordMatchCount: number }> = [];
+
+  if (originalResult.valid && company.source_url) {
+    try {
+      validUrls.push({
+        url: company.source_url,
+        domain: new URL(company.source_url).hostname,
+        keywordMatchCount: originalResult.keywordMatchCount,
+      });
+    } catch { /* invalid URL */ }
+  }
+
+  // Step B: secondary Perplexity search for corroborating sources
+  const signalKeyword = company.signal_name.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+  const corrobPrompt = `Find recent news articles (published in the last 30 days) specifically about "${company.name}" in Australia related to: ${signalKeyword}.
+
+Return only articles that are specifically about this company and this event - no category pages, no listing pages.
+
+Return JSON only:
+{"articles": [{"url": "https://...", "title": "Article title", "published_date": "YYYY-MM-DD"}]}`;
+
+  const { ok, data } = await safeFetchJson(
+    "https://api.perplexity.ai/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "sonar",
+        messages: [
+          {
+            role: "system",
+            content: "You are a research assistant. Return only valid JSON. No markdown.",
+          },
+          { role: "user", content: corrobPrompt },
+        ],
+        temperature: 0.1,
+      }),
+    }
+  );
+
+  if (ok) {
+    const choices = data.choices as Record<string, Record<string, string>>[] | undefined;
+    const text = choices?.[0]?.message?.content || "";
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        const articles: Array<{ url: string }> = parsed.articles || [];
+
+        // Validate each corroborating URL in parallel
+        const corrobResults = await Promise.all(
+          articles.slice(0, 5).map(async (a) => {
+            if (!a.url) return null;
+            const res = await validateUrl(a.url);
+            if (!res.valid) return null;
+            try {
+              return { url: a.url, domain: new URL(a.url).hostname, keywordMatchCount: res.keywordMatchCount };
+            } catch { return null; }
+          })
+        );
+
+        for (const r of corrobResults) {
+          if (!r) continue;
+          // Only add if domain is different from all already-valid URLs
+          const domainAlreadySeen = validUrls.some((v) => v.domain === r.domain);
+          if (!domainAlreadySeen) {
+            validUrls.push(r);
+          }
+        }
+      } catch { /* parse error */ }
+    }
+  }
+
+  // Require minimum 2 valid URLs from 2 different domains
+  if (validUrls.length < 2) {
+    console.warn(`[corroborate] REJECTED ${company.name} - only ${validUrls.length} valid source(s) found (need 2 from different domains)`);
+    return { passed: false, bestUrl: null };
+  }
+
+  // Pick the best URL: highest keywordMatchCount
+  const best = validUrls.sort((a, b) => b.keywordMatchCount - a.keywordMatchCount)[0];
+  console.log(`[corroborate] PASSED ${company.name} - ${validUrls.length} valid sources. Best: ${best.url}`);
+  return { passed: true, bestUrl: best.url };
+}
+
+// ─── Source URL verification ─────────────────────────────────────────
+
 interface VerificationResult {
   companyFound: boolean;
   evidenceFound: boolean;
+  publishedDate: Date | null;
+  keywordMatchCount: number;
 }
 
 async function verifySourceUrl(url: string, companyName: string, evidence: string): Promise<VerificationResult> {
+  const fail: VerificationResult = { companyFound: false, evidenceFound: false, publishedDate: null, keywordMatchCount: 0 };
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -223,14 +390,14 @@ async function verifySourceUrl(url: string, companyName: string, evidence: strin
 
     clearTimeout(timeout);
 
-    if (!res.ok) return { companyFound: false, evidenceFound: false };
+    if (!res.ok) return fail;
 
     const contentType = res.headers.get("content-type") || "";
-    if (!contentType.includes("text/html")) return { companyFound: false, evidenceFound: false };
+    if (!contentType.includes("text/html")) return fail;
 
     // Read first 50KB
     const reader = res.body?.getReader();
-    if (!reader) return { companyFound: false, evidenceFound: false };
+    if (!reader) return fail;
 
     let text = "";
     const decoder = new TextDecoder();
@@ -243,25 +410,68 @@ async function verifySourceUrl(url: string, companyName: string, evidence: strin
 
     const pageText = text.toLowerCase();
 
-    // Check company name
+    // ── Extract publication date ──
+    let publishedDate: Date | null = null;
+
+    // Priority 1: <meta property="article:published_time">
+    const ogDateMatch = text.match(/<meta\s+(?:property|name)="article:published_time"\s+content="([^"]+)"/i);
+    if (ogDateMatch) {
+      const d = new Date(ogDateMatch[1]);
+      if (!isNaN(d.getTime())) publishedDate = d;
+    }
+
+    // Priority 2: <meta name="pubdate">
+    if (!publishedDate) {
+      const pubdateMatch = text.match(/<meta\s+name="pubdate"\s+content="([^"]+)"/i);
+      if (pubdateMatch) {
+        const d = new Date(pubdateMatch[1]);
+        if (!isNaN(d.getTime())) publishedDate = d;
+      }
+    }
+
+    // Priority 3: <time datetime="...">
+    if (!publishedDate) {
+      const timeMatch = text.match(/<time[^>]+datetime="([^"]+)"/i);
+      if (timeMatch) {
+        const d = new Date(timeMatch[1]);
+        if (!isNaN(d.getTime())) publishedDate = d;
+      }
+    }
+
+    // Priority 4: JSON-LD datePublished
+    if (!publishedDate) {
+      const ldMatches = text.matchAll(/<script\s+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi);
+      for (const m of ldMatches) {
+        try {
+          const ld = JSON.parse(m[1]);
+          const dp = ld.datePublished || (Array.isArray(ld["@graph"]) ? ld["@graph"].find((g: Record<string, unknown>) => g.datePublished)?.datePublished : null);
+          if (dp) {
+            const d = new Date(dp as string);
+            if (!isNaN(d.getTime())) { publishedDate = d; break; }
+          }
+        } catch { /* invalid JSON-LD */ }
+      }
+    }
+
+    // ── Check company name ──
     const nameWords = companyName.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
     const companyFound =
       pageText.includes(companyName.toLowerCase()) ||
       (nameWords[0]?.length > 3 && pageText.includes(nameWords[0]));
 
-    // Check evidence keywords (pick 2-3 significant words from evidence)
+    // ── Check evidence keywords ──
     const evidenceWords = evidence
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, "")
       .split(/\s+/)
       .filter((w) => w.length > 4)
       .slice(0, 5);
-    const evidenceMatches = evidenceWords.filter((w) => pageText.includes(w)).length;
-    const evidenceFound = evidenceMatches >= Math.min(2, evidenceWords.length);
+    const keywordMatchCount = evidenceWords.filter((w) => pageText.includes(w)).length;
+    const evidenceFound = keywordMatchCount >= Math.min(2, evidenceWords.length);
 
-    return { companyFound, evidenceFound };
+    return { companyFound, evidenceFound, publishedDate, keywordMatchCount };
   } catch {
     // Network error — fail closed, don't trust unverifiable sources
-    return { companyFound: false, evidenceFound: false };
+    return fail;
   }
 }
