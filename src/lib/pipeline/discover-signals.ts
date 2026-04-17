@@ -262,14 +262,16 @@ async function corroborateCompany(
       return { valid: false, keywordMatchCount: 0 };
     }
     const result = await verifySourceUrl(url, company.name, company.evidence);
-    if (!result.companyFound || !result.evidenceFound) {
-      console.warn(`[corroborate] Verification failed for ${company.name}: ${url}`);
+    if (!result.companyFound) {
+      console.warn(`[corroborate] Verification failed for ${company.name}: ${url} — company not found on page`);
       return { valid: false, keywordMatchCount: 0 };
     }
-    if (!result.publishedDate || result.publishedDate < THIRTY_DAYS_AGO) {
-      console.warn(`[corroborate] Stale or undated source for ${company.name}: ${url} (date: ${result.publishedDate?.toISOString() ?? "null"})`);
+    // evidenceFound is a quality signal but not a hard gate — captured via keywordMatchCount
+    if (result.publishedDate && result.publishedDate < THIRTY_DAYS_AGO) {
+      console.warn(`[corroborate] Stale source rejected for ${company.name}: ${url} (published: ${result.publishedDate.toISOString()})`);
       return { valid: false, keywordMatchCount: 0 };
     }
+    // Note: if publishedDate is null (JS-rendered or paywalled), we soft-pass — other gates still apply
     return { valid: true, keywordMatchCount: result.keywordMatchCount };
   }
 
