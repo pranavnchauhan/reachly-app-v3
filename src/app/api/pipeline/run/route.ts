@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { discoverSignals } from "@/lib/pipeline/discover-signals";
 import { enrichContacts } from "@/lib/pipeline/enrich-contacts";
 import { deepResearch } from "@/lib/pipeline/deep-research";
+import { lookupABN } from "@/lib/pipeline/lookup-abn";
 import type { Signal } from "@/types/database";
 import type { SignalResult } from "@/lib/pipeline/types";
 
@@ -210,16 +211,59 @@ async function executePipeline(runId: string, nicheId: string | null) {
         continue;
       }
 
+      // ─── Step 3: ABN Verification ────────────────────────────────
+      await updateRun("verifying_abn", { niche: template.name, step: "Verifying ABNs via ABR..." });
+
+      const abnResults = new Map<string, { abn: string | null; abn_status: string | null; gst_registered: boolean }>();
+      for (const lead of enrichedLeads) {
+        const result = await lookupABN(lead.company.name);
+        abnResults.set(lead.company.name.toLowerCase(), {
+          abn: result?.abn || null,
+          abn_status: result?.is_active ? "Active" : (result?.abn_status || null),
+          gst_registered: result?.gst_registered || false,
+        });
+      }
+
+      const abnVerified = [...abnResults.values()].filter((r) => r.abn !== null).length;
+
+      // Filter out dissolved/cancelled entities (hard reject)
+      const beforeCount = enrichedLeads.length;
+      const activeLeads = enrichedLeads.filter((lead) => {
+        const abnData = abnResults.get(lead.company.name.toLowerCase());
+        // Hard reject: ABN found but entity is not active (dissolved, cancelled)
+        if (abnData?.abn && abnData.abn_status && abnData.abn_status !== "Active") {
+          return false;
+        }
+        // Soft pass (null lookup) and active ABNs go through
+        return true;
+      });
+      const rejectedCount = beforeCount - activeLeads.length;
+
+      await updateRun("verifying_abn", {
+        niche: template.name,
+        step: `${abnVerified}/${beforeCount} ABNs verified` + (rejectedCount > 0 ? `, ${rejectedCount} rejected: dissolved ABN` : ""),
+        verified: abnVerified,
+        rejected: rejectedCount,
+      });
+
+      if (activeLeads.length === 0) {
+        results.push({
+          niche: template.name, step: "abn_filter", hot: hotCount,
+          cold: 0, leads: 0, detail: `All ${beforeCount} leads rejected: dissolved ABNs`,
+        });
+        continue;
+      }
+
       // ─── Step 4: Deep research (top 5) ──────────────────────────
       await updateRun("researching", { niche: template.name, step: "AI-researching top leads..." });
 
       let researchedLeads = await deepResearch(
-        enrichedLeads.slice(0, 5),
+        activeLeads.slice(0, 5),
         template.description || template.name
       );
 
-      if (enrichedLeads.length > 5) {
-        const remaining = enrichedLeads.slice(5).map((lead) => ({
+      if (activeLeads.length > 5) {
+        const remaining = activeLeads.slice(5).map((lead) => ({
           ...lead,
           justification: "Signal-matched lead (research pending)",
           contact_summary: "",
@@ -232,7 +276,7 @@ async function executePipeline(runId: string, nicheId: string | null) {
       await updateRun("researching", {
         niche: template.name,
         step: `${researchedLeads.length} leads fully processed`,
-        researched: Math.min(enrichedLeads.length, 5),
+        researched: Math.min(activeLeads.length, 5),
       });
 
       // ─── Step 5: Store leads ────────────────────────────────────
@@ -242,6 +286,7 @@ async function executePipeline(runId: string, nicheId: string | null) {
         const original = discovered.find(
           (d) => d.name.toLowerCase() === lead.company.name.toLowerCase()
         );
+        const abnData = abnResults.get(lead.company.name.toLowerCase());
         return {
           niche_template_id: template.id,
           client_niche_id: null,
@@ -263,6 +308,9 @@ async function executePipeline(runId: string, nicheId: string | null) {
           contact_linkedin: lead.contact.linkedin_url,
           contact_summary: lead.contact_summary,
           email_templates: lead.email_templates,
+          abn: abnData?.abn || null,
+          abn_status: abnData?.abn ? (abnData.abn_status || "Unknown") : "unverified",
+          gst_registered: abnData?.gst_registered || false,
           status: "discovered" as const,
           batch_id: batchId,
         };
