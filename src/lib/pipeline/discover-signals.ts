@@ -99,6 +99,29 @@ const NEWS_SEARCH_HINTS: Record<string, string> = {
   "High Staff Turnover": "company experiencing high employee turnover, retention issues, or hiring difficulties",
   "Failed Tech Implementation": "company reporting failed software rollout, IT project delays, or technology migration issues",
   "Revenue Growth + Flat Margins": "company growing revenue but reporting flat or declining profit margins",
+
+  // Post-Merger IT Integration signals
+  "Recent Acquisition Announced": "Australian company completing acquisition, merger, or being acquired by another company in the last 30 days",
+  "PE Firm Involvement": "private equity firm acquiring stake or completing buyout of Australian company",
+  "CTO / IT Director Departure": "Australian company CTO, IT director, or chief information officer resigned, departed, or replaced",
+  "ERP or Core System Migration": "Australian company migrating, replacing, or consolidating ERP, CRM, or core business system post-acquisition",
+  "New Group Structure Announced": "Australian company restructured into group or holding company with new subsidiaries or divisions",
+
+  // ERP & Systems Modernisation signals
+  "Legacy ERP Announced for Replacement": "Australian company replacing or upgrading legacy ERP or core business system",
+  "Digital Transformation Initiative": "Australian company announcing digital transformation program or technology modernisation roadmap",
+  "CFO or Finance Director Hire": "Australian company appointing new CFO, chief financial officer, or finance director",
+  "Rapid Growth Beyond Current System": "fast-growing Australian company announcing expansion, new locations, or operational scaling challenges",
+  "Multi-Entity / Multi-Site Complexity": "Australian company expanding operations across multiple sites, entities, or states requiring systems consolidation",
+  "Acquisition Creating System Mismatch": "Australian company acquired a business creating technology integration or systems consolidation requirement",
+
+  // AI Readiness & Implementation signals
+  "Microsoft Copilot / M365 AI Rollout": "Australian company rolling out Microsoft Copilot, M365 AI tools, or enterprise AI platform across staff",
+  "Digital Transformation + AI Mention": "Australian company announcing AI strategy, AI program, or digital transformation initiative including artificial intelligence",
+  "Hiring AI / Data Leadership Roles": "Australian company hiring chief AI officer, head of AI, data and AI lead, or AI program manager",
+  "AI Budget Announced Without Execution Plan": "Australian company announcing AI investment, AI budget allocation, or AI commitment from board or executive",
+  "Automation / Efficiency Push": "Australian company announcing automation program, efficiency drive, or cost reduction through technology",
+  "Compliance or Regulatory AI Pressure": "Australian company responding to APRA, ASIC, or regulatory AI governance requirements",
 };
 
 async function searchNewsForSignal(
