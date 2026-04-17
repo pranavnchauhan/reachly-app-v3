@@ -2,7 +2,7 @@
 import { authFetch } from "@/lib/auth-fetch";
 
 import { useState, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
+
 import {
   Check, X, Eye, Mail, Linkedin, Globe, Phone, Building2, MapPin,
   Flame, ExternalLink, ChevronRight, Search, Users, RefreshCw, Star, ArrowRight,
@@ -211,14 +211,18 @@ export function LeadValidationList({ initialLeads, templates }: { initialLeads: 
     const count = leads.filter((l) => l.status === "discovered").length;
     if (!confirm(`Delete all ${count} discovered leads? This cannot be undone.`)) return;
     setPurging(true);
-    const supabase = createClient();
     const ids = leads.filter((l) => l.status === "discovered").map((l) => l.id);
-    const { error } = await supabase.from("leads").delete().in("id", ids);
-    if (!error) {
+    const res = await authFetch("/api/admin/purge-leads", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (res.ok) {
       setLeads((prev) => prev.filter((l) => l.status !== "discovered"));
       setSelectedLead(null);
     } else {
-      alert("Failed to purge: " + error.message);
+      const data = await res.json().catch(() => ({ error: "Unknown error" }));
+      alert("Failed to purge: " + (data.error || res.statusText));
     }
     setPurging(false);
   }, [leads]);
