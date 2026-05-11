@@ -41,7 +41,7 @@ function ctaButton(text: string, href: string): string {
 }
 
 export async function sendEmail({ to, toName, subject, body }: EmailOptions): Promise<boolean> {
-  const apiKey = process.env.RESEND_API_KEY;
+  const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) {
     console.warn("[EMAIL] RESEND_API_KEY not set, skipping email to", to);
     return false;
