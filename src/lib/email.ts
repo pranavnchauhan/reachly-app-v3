@@ -1,5 +1,5 @@
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au";
+const RESEND_API_URL = "https://api.resend.com/emails";
 
 interface EmailOptions {
   to: string;
@@ -41,30 +41,33 @@ function ctaButton(text: string, href: string): string {
 }
 
 export async function sendEmail({ to, toName, subject, body }: EmailOptions): Promise<boolean> {
-  if (!SENDGRID_API_KEY) {
-    console.warn("[EMAIL] SENDGRID_API_KEY not set, skipping email to", to);
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.warn("[EMAIL] RESEND_API_KEY not set, skipping email to", to);
     return false;
   }
 
   const html = brandedWrapper(body);
+  const safeName = (toName || to).replace(/[",<>]/g, "").trim();
+  const toField = safeName && safeName !== to ? `${safeName} <${to}>` : to;
 
   try {
-    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    const res = await fetch(RESEND_API_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${SENDGRID_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        personalizations: [{ to: [{ email: to, name: toName || to }] }],
-        from: { email: "noreply@reachly.com.au", name: "Reachly AI" },
+        from: "Reachly AI <noreply@reachly.com.au>",
+        to: [toField],
         subject,
-        content: [{ type: "text/html", value: html }],
+        html,
       }),
     });
 
     if (!res.ok) {
-      console.error("[EMAIL] SendGrid error:", res.status, await res.text().catch(() => ""));
+      console.error("[EMAIL] Resend error:", res.status, await res.text().catch(() => ""));
     }
     return res.ok;
   } catch (err) {

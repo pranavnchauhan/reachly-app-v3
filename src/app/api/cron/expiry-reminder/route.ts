@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const CRON_SECRET = process.env.CRON_SECRET;
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://app.reachly.com.au";
+const RESEND_API_URL = "https://api.resend.com/emails";
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
@@ -111,8 +111,9 @@ async function sendReminderEmail({
   daysLeft: number;
   expiryDate: string;
 }): Promise<boolean> {
-  if (!SENDGRID_API_KEY) {
-    console.warn("[EXPIRY CRON] SENDGRID_API_KEY not set, skipping email to", to);
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.warn("[EXPIRY CRON] RESEND_API_KEY not set, skipping email to", to);
     return false;
   }
 
@@ -163,21 +164,27 @@ async function sendReminderEmail({
     </div>
   `;
 
+  const safeName = name.replace(/[",<>]/g, "").trim();
+  const toField = safeName ? `${safeName} <${to}>` : to;
+
   try {
-    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    const res = await fetch(RESEND_API_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${SENDGRID_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        personalizations: [{ to: [{ email: to, name }] }],
-        from: { email: "noreply@reachly.com.au", name: "Reachly AI" },
+        from: "Reachly AI <noreply@reachly.com.au>",
+        to: [toField],
         subject,
-        content: [{ type: "text/html", value: html }],
+        html,
       }),
     });
 
+    if (!res.ok) {
+      console.error("[EXPIRY CRON] Resend error:", res.status, await res.text().catch(() => ""));
+    }
     return res.ok;
   } catch (err) {
     console.error(`[EXPIRY CRON] Failed to send to ${to}:`, err);
