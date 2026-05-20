@@ -94,8 +94,8 @@ function findBestTitleMatch(
       score = 30;
     }
 
-    // Penalize clearly wrong titles (artist, technician, intern, etc.)
-    if (/\b(artist|intern|student|assistant|receptionist|technician|coordinator|clerk)\b/i.test(title)) {
+    // Penalize clearly wrong titles (artist, technician, intern, sales/BD, etc.)
+    if (/\b(artist|intern|student|assistant|receptionist|technician|coordinator|clerk|sales|account executive|account manager|business development|bdr|sdr)\b/i.test(title)) {
       score = Math.max(0, score - 40);
     }
 
@@ -105,11 +105,11 @@ function findBestTitleMatch(
   // Sort by score descending, take highest
   scored.sort((a, b) => b.score - a.score);
 
-  // Must have at least score 30 (manager-level or above)
-  if (scored[0]?.score >= 30) return scored[0].person;
+  // Must have at least score 40 (director-level or above)
+  if (scored[0]?.score >= 40) return scored[0].person;
 
-  // If no good title match, still return the first c_suite/director person
-  return scored[0]?.score > 0 ? scored[0].person : null;
+  // No acceptable match — skip this lead entirely rather than return a wrong contact
+  return null;
 }
 
 async function searchForPeople(

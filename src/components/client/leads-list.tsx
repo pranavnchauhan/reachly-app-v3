@@ -6,7 +6,7 @@ import {
   ChevronRight, ChevronDown, AlertTriangle, Flame, Send, Copy,
   Check, X, Users, Target, MessageSquare, Sparkles, ExternalLink,
   Clock, Star, DollarSign, MessageCircle, PhoneCall, CalendarCheck,
-  ArrowRight, Bookmark,
+  ArrowRight, Bookmark, ShieldCheck,
 } from "lucide-react";
 import type { MatchedSignal, ApproachStrategy, GeneratedEmail, LeadDisposition, LeadNote, NoteType } from "@/types/database";
 
@@ -27,6 +27,8 @@ interface Lead {
   justification: string;
   approach_strategies: ApproachStrategy[];
   email_templates: GeneratedEmail[];
+  abn: string | null;
+  abn_status: string | null;
   status: string;
   published_at: string | null;
   disposition?: LeadDisposition;
@@ -313,6 +315,9 @@ export function ClientLeadsList({
                     {lead.contact_email && <span className="flex items-center gap-1 text-primary"><Mail className="w-3 h-3" /> Email</span>}
                     {lead.contact_linkedin && <span className="flex items-center gap-1 text-primary"><Linkedin className="w-3 h-3" /> LinkedIn</span>}
                     {lead.contact_phone && <span className="flex items-center gap-1 text-primary"><Phone className="w-3 h-3" /> Phone</span>}
+                    {lead.abn && (
+                      <span className="flex items-center gap-1 text-success"><ShieldCheck className="w-3 h-3" /> ABN Verified</span>
+                    )}
                   </div>
                   {lead.follow_up_date && new Date(lead.follow_up_date) <= new Date() && (
                     <div className="flex items-center gap-1.5 mt-2 text-xs text-warning">
@@ -359,6 +364,11 @@ export function ClientLeadsList({
                   {currentDisposition && (
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${currentDisposition.color}`}>
                       {currentDisposition.label}
+                    </span>
+                  )}
+                  {selectedLead.abn && (
+                    <span className="text-[10px] font-medium bg-success/10 text-success px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3" /> ABN Verified
                     </span>
                   )}
                 </div>
